@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>NEXUS — Real Integration</title>
+
+<!-- ═══ REAL EXTERNAL LIBRARIES ═══ -->
+<!-- Leaflet.js — Real OpenStreetMap -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Firebase SDK (Real Backend) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+  // ╔══════════════════════════════════════════════════╗
+  // ║  🔧 PASTE YOUR FIREBASE CONFIG HERE             ║
+  // ║  Get it from: console.firebase.google.com       ║
+  // ║  Project Settings → Your Apps → SDK Setup       ║
+  // ╚══════════════════════════════════════════════════╝
+  const firebaseConfig = {
+    apiKey:            "YOUR_API_KEY",
+    authDomain:        "YOUR_PROJECT.firebaseapp.com",
+    projectId:         "YOUR_PROJECT_ID",
+    storageBucket:     "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId:             "YOUR_APP_ID"
+  };
+
+  // Check if config is real or placeholder
+  const isConfigured = firebaseConfig.apiKey !== "YOUR_API_KEY";
+
+  let db = null, auth = null, currentUser = null;
+
+  if (isConfigured) {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    auth = getAuth(app);
+
+    // Auto sign-in anonymously (so users can post reports without registration)
+    signInAnonymously(auth).catch(console.error);
+    onAuthStateChanged(auth, user => {
+      currentUser = user;
+      if (user) {
+        document.getElementById('authStatus').textContent = '✓ Connected as ' + user.uid.slice(0,8) + '…';
+        document.getElementById('authStatus').style.color = '#34d399';
+      }
+    });
+
+    // ── REAL-TIME REPORTS LISTENER ──
+    // Listens for new reports from ALL users in real time
+    const reportsQ = query(
+      collection(db, 'traffic_reports'),
+      orderBy('timestamp', 'desc'),
+      limit(20)
+    );
+    onSnapshot(reportsQ, (snapshot) => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          window.addReportToFeed({
+            id: change.doc.id,
+            ...data,
+            isReal: true
+          });
+        }
+      });
+    });
+
+    // ── REAL-TIME EMERGENCY LISTENER ──
+    const emerQ = query(
+      collection(db, 'emergencies'),
+      orderBy('timestamp', 'desc'),
+      limit(1)
+    );
+    onSnapshot(emerQ, (snapshot) => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          window.showEmergencyAlert(data);
+        }
+      });
+    });
+
+    // Expose DB to window for use in regular JS
+    window.firebaseDB = db;
+    window.firebaseCollections = { collection, addDoc, serverTimestamp };
+    window.isFirebaseReady = true;
+  } else {
+    window.isFirebaseReady = false;
+    console.warn('Firebase not configured — running in demo mode');
+  }
+</script>
+
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#0d1421;--surface:#111d2e;--surface2:#162038;
+  --blue:#00c8ff;--green:#34d399;--orange:#fb923c;
+  --red:#f87171;--yellow:#fbbf24;--emer:#ff3c50;
+  --text:#e0eef8;--muted:#5a7a9a;--border:rgba(255,255,255,0.08);
+}
+html,body{
+  height:100%;background:#0b0f1a;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  padding:20px 10px;
+}
+body::before{content:'';position:fixed;inset:0;
+  background:radial-gradient(ellipse 50% 60% at 15% 20%,rgba(0,200,255,0.06),transparent),
+             radial-gradient(ellipse 40% 50% at 85% 75%,rgba(52,211,153,0.05),transparent);
+  pointer-events:none;}
+
+/* PHONE */
+.phone{width:390px;background:#0d1117;border-radius:50px;
+  border:2px solid rgba(255,255,255,0.1);
+  box-shadow:0 50px 100px rgba(0,0,0,0.8),0 0 80px rgba(0,200,255,0.06),
+             inset 0 0 0 1px rgba(255,255,255,0.03);
+  overflow:hidden;position:relative;}
+.notch{position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:120px;height:34px;background:#0d1117;border-radius:0 0 20px 20px;z-index:300;}
+.screen{height:844px;overflow:hidden;position:relative;background:var(--bg);}
+
+/* STATUS */
+.sbar{display:flex;justify-content:space-between;align-items:center;
+  padding:12px 24px 6px;font-size:12px;font-weight:600;color:#fff;position:relative;z-index:20;}
+.sbar-time{font-size:15px;font-weight:700;}
+.sbar-r{display:flex;gap:5px;align-items:center;font-size:11px;}
+
+/* SETUP BANNER */
+.setup-banner{
+  margin:0;padding:10px 16px;
+  background:linear-gradient(135deg,rgba(251,191,36,0.15),rgba(251,146,60,0.1));
+  border-bottom:1px solid rgba(251,191,36,0.2);
+  font-size:11px;font-family:'JetBrains Mono',monospace;
+  display:flex;align-items:center;gap:8px;
+}
+.setup-banner.connected{background:linear-gradient(135deg,rgba(52,211,153,0.1),rgba(0,200,255,0.08));border-color:rgba(52,211,153,0.2);}
+.setup-dot{width:6px;height:6px;border-radius:50%;background:var(--yellow);flex-shrink:0;}
+.setup-dot.live{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+/* SCROLLABLE APP */
+.app{height:calc(844px - 34px);overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;}
+.app::-webkit-scrollbar{display:none;}
+
+/* PAGES */
+.page{display:none;flex-direction:column;padding-bottom:90px;min-height:100%;}
+.page.active{display:flex;animation:fadeUp 0.3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+
+/* NAV */
+.bnav{position:absolute;bottom:0;left:0;right:0;
+  background:rgba(13,17,23,0.96);backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  display:flex;padding:8px 0 26px;z-index:200;}
+.ni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+  cursor:pointer;padding:5px 0;-webkit-tap-highlight-color:transparent;}
+.ni:active{transform:scale(0.9);}
+.ni-icon{font-size:21px;line-height:1;position:relative;}
+.nbadge{position:absolute;top:-4px;right:-7px;
+  background:var(--emer);width:15px;height:15px;border-radius:50%;
+  font-size:9px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;}
+.ni-lbl{font-size:10px;font-weight:600;color:var(--muted);}
+.ni.active .ni-lbl{color:var(--blue);}
+
+/* CARD */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:16px;margin:0 16px 12px;}
+.card-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px;
+  display:flex;justify-content:space-between;align-items:center;}
+.card-title-sm{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.5px;
+  text-transform:uppercase;margin-bottom:10px;}
+
+/* PAGE HEADER */
+.phdr{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 14px;}
+.phdr-title{font-family:'Syne',sans-serif;font-size:21px;font-weight:800;color:var(--text);}
+.phdr-btn{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,0.05);
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
+  font-size:15px;cursor:pointer;}
+
+/* ═══ HOME ═══ */
+.hero{padding:8px 16px 16px;background:linear-gradient(180deg,var(--bg) 0%,var(--surface) 100%);
+  position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(0,200,255,0.08),transparent);}
+.greeting{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:2px;}
+.hero-h{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--text);
+  line-height:1.2;margin-bottom:14px;}
+.hero-h span{color:var(--blue);}
+.loc-row{display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,0.04);border:1px solid var(--border);
+  border-radius:14px;padding:10px 14px;margin-bottom:16px;}
+.loc-ping{width:8px;height:8px;border-radius:50%;background:var(--blue);
+  box-shadow:0 0 8px var(--blue);animation:pulse 2s infinite;flex-shrink:0;}
+.loc-txt{flex:1;font-size:12px;color:var(--text);font-weight:500;}
+.stats-row{display:flex;gap:8px;margin-bottom:16px;}
+.stat-p{flex:1;background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:14px;padding:12px 10px;text-align:center;}
+.sv{font-family:'Syne',sans-serif;font-size:19px;font-weight:700;line-height:1;}
+.sl{font-size:10px;color:var(--muted);margin-top:3px;font-weight:500;}
+
+/* REAL MAP */
+#realMap{height:200px;border-radius:16px;margin:0 16px 12px;
+  border:1px solid var(--border);overflow:hidden;z-index:1;position:relative;}
+/* Override Leaflet styles for dark theme */
+.leaflet-container{background:#0d1421 !important;}
+.leaflet-tile-pane{filter:brightness(0.6) saturate(0.8) hue-rotate(180deg);}
+
+/* Quick grid */
+.qgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 16px 16px;}
+.qbtn{background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:14px;padding:13px 8px 11px;text-align:center;cursor:pointer;
+  transition:all 0.15s;-webkit-tap-highlight-color:transparent;}
+.qbtn:active{transform:scale(0.93);background:rgba(255,255,255,0.08);}
+.qi{font-size:21px;margin-bottom:5px;}
+.ql{font-size:10px;font-weight:600;color:var(--muted);}
+
+/* Alert item */
+.aitem{display:flex;gap:10px;align-items:flex-start;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:12px;margin:0 16px 8px;cursor:pointer;
+  transition:all 0.15s;}
+.aitem:active{background:rgba(255,255,255,0.05);}
+.aicon{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;
+  justify-content:center;font-size:17px;flex-shrink:0;}
+.abody{flex:1;}
+.atitle{font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px;}
+.asub{font-size:11px;color:var(--muted);line-height:1.4;}
+.atime{font-size:10px;color:#3a5a6a;margin-top:3px;font-weight:500;}
+.apill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;flex-shrink:0;}
+
+.shdr{display:flex;justify-content:space-between;align-items:center;
+  padding:0 16px;margin-bottom:10px;}
+.stitle{font-size:15px;font-weight:700;color:var(--text);}
+.smore{font-size:12px;color:var(--blue);font-weight:600;cursor:pointer;}
+
+/* ═══ ROUTES ═══ */
+.sbox{display:flex;gap:8px;align-items:center;
+  background:rgba(255,255,255,0.05);border:1px solid var(--border);
+  border-radius:14px;padding:11px 14px;margin:0 16px 10px;}
+.sinput{flex:1;background:none;border:none;outline:none;
+  color:var(--text);font-size:13px;font-family:'Plus Jakarta Sans',sans-serif;font-weight:500;}
+.sinput::placeholder{color:#3a5a6a;}
+
+#routeMap{height:210px;border-radius:16px;margin:0 16px 12px;
+  border:1px solid var(--border);overflow:hidden;position:relative;z-index:1;}
+.leaflet-tile-pane{filter:brightness(0.55) saturate(0.7) hue-rotate(185deg);}
+
+.rcard{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  padding:14px;margin:0 16px 10px;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden;}
+.rcard.best{border-color:rgba(52,211,153,0.3);background:rgba(52,211,153,0.04);}
+.rcard.best::after{content:'AI PICK';position:absolute;top:10px;right:10px;
+  background:rgba(52,211,153,0.15);border:1px solid rgba(52,211,153,0.3);
+  color:var(--green);font-size:9px;font-weight:700;letter-spacing:1px;
+  padding:2px 7px;border-radius:20px;}
+.rcard:active{transform:scale(0.98);}
+.rname{font-size:13px;font-weight:700;color:var(--text);margin-bottom:9px;}
+.rmets{display:flex;gap:14px;}
+.rv{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;line-height:1;}
+.rl{font-size:10px;color:var(--muted);margin-top:2px;}
+.cbar{height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:9px;overflow:hidden;}
+.cfill{height:100%;border-radius:2px;}
+
+/* ═══ REPORTS ═══ */
+.rtgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px 14px;}
+.rtbtn{border-radius:16px;padding:16px 14px;cursor:pointer;border:1px solid var(--border);
+  transition:all 0.15s;-webkit-tap-highlight-color:transparent;}
+.rtbtn:active{transform:scale(0.95);}
+.rticon{font-size:24px;margin-bottom:7px;}
+.rtname{font-size:13px;font-weight:700;color:var(--text);}
+.rtsub{font-size:10px;color:var(--muted);margin-top:2px;}
+
+/* Report feed item */
+.rfi{display:flex;gap:10px;background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:12px;margin:0 16px 8px;}
+.rfi-icon{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;
+  justify-content:center;font-size:15px;flex-shrink:0;}
+.rfi-body{flex:1;}
+.rfi-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px;}
+.rfi-sub{font-size:10px;color:var(--muted);}
+.rfi-row{display:flex;align-items:center;gap:6px;margin-top:5px;}
+.vote-sm{background:rgba(0,200,255,0.08);border:1px solid rgba(0,200,255,0.2);
+  border-radius:20px;padding:3px 9px;font-size:11px;color:var(--blue);
+  font-weight:600;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;}
+.real-badge{background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);
+  border-radius:20px;padding:2px 7px;font-size:9px;font-weight:700;
+  color:var(--green);font-family:'JetBrains Mono',monospace;}
+.demo-badge{background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.25);
+  border-radius:20px;padding:2px 7px;font-size:9px;font-weight:700;
+  color:var(--yellow);font-family:'JetBrains Mono',monospace;}
+
+/* ═══ PARKING ═══ */
+.pzones{display:flex;gap:8px;margin:0 16px 12px;}
+.pzone{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:12px 10px;text-align:center;cursor:pointer;transition:all 0.15s;}
+.pzone.sel{border-color:rgba(0,200,255,0.35);background:rgba(0,200,255,0.06);}
+.pzone:active{transform:scale(0.97);}
+.pz-name{font-size:10px;font-weight:700;color:var(--muted);margin-bottom:5px;}
+.pz-val{font-family:'Syne',sans-serif;font-size:20px;font-weight:700;}
+.pz-lbl{font-size:10px;color:var(--muted);margin-top:2px;}
+.pz-bar{height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:7px;overflow:hidden;}
+.pz-fill{height:100%;border-radius:2px;}
+
+.slotgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:0 16px 10px;}
+.slot{height:44px;border-radius:9px;border:1px solid;display:flex;align-items:center;
+  justify-content:center;font-size:10px;font-weight:700;cursor:pointer;
+  transition:all 0.15s;font-family:'JetBrains Mono',monospace;}
+.slot.free{background:rgba(52,211,153,0.07);border-color:rgba(52,211,153,0.3);color:var(--green);}
+.slot.taken{background:rgba(248,113,113,0.06);border-color:rgba(248,113,113,0.15);color:#3a5a6a;}
+.slot.reserved{background:rgba(251,191,36,0.07);border-color:rgba(251,191,36,0.25);color:var(--yellow);}
+.slot.sel{background:rgba(0,200,255,0.18)!important;border-color:var(--blue)!important;
+  color:var(--blue)!important;transform:scale(1.06);box-shadow:0 0 10px rgba(0,200,255,0.25);}
+.slot.free:active{transform:scale(0.95);}
+
+.cta-btn{display:block;width:calc(100% - 32px);margin:0 16px;
+  background:linear-gradient(135deg,var(--blue),#0080ff);
+  border:none;border-radius:16px;padding:15px;
+  font-size:14px;font-weight:700;color:#fff;cursor:pointer;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  box-shadow:0 6px 20px rgba(0,200,255,0.22);transition:all 0.2s;}
+.cta-btn:active{transform:scale(0.98);}
+.cta-btn.green{background:linear-gradient(135deg,var(--green),#059669);
+  box-shadow:0 6px 20px rgba(52,211,153,0.2);}
+
+/* ═══ EMERGENCY ═══ */
+.emer-card{margin:0 16px 14px;border-radius:18px;padding:16px;
+  background:rgba(255,60,80,0.07);border:1px solid rgba(255,60,80,0.25);}
+.emer-card.active-emer{animation:emerGlow 2s infinite;}
+@keyframes emerGlow{0%,100%{box-shadow:none;}50%{box-shadow:0 0 24px rgba(255,60,80,0.2);}}
+.etag{display:inline-flex;align-items:center;gap:5px;
+  background:rgba(255,60,80,0.18);border:1px solid rgba(255,60,80,0.35);
+  border-radius:20px;padding:4px 10px;margin-bottom:10px;
+  font-size:10px;font-weight:700;color:var(--emer);letter-spacing:0.5px;}
+.etag-dot{width:5px;height:5px;border-radius:50%;background:var(--emer);animation:pulse 1s infinite;}
+.eveh{font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:var(--text);margin-bottom:5px;}
+.esub{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px;}
+.eroute{display:flex;align-items:center;gap:5px;flex-wrap:wrap;
+  background:rgba(255,255,255,0.03);border-radius:10px;padding:8px 10px;margin-bottom:12px;}
+.enode{background:rgba(255,60,80,0.12);border:1px solid rgba(255,60,80,0.3);
+  border-radius:7px;padding:3px 8px;color:var(--emer);font-size:10px;font-weight:700;}
+.ebts{display:flex;gap:8px;}
+.ebt{flex:1;border-radius:12px;padding:11px;border:none;
+  font-size:12px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;transition:all 0.2s;}
+.ebt:active{transform:scale(0.96);}
+.ebt-p{background:linear-gradient(135deg,var(--emer),#cc0020);color:#fff;}
+.ebt-s{background:rgba(255,60,80,0.1);border:1px solid rgba(255,60,80,0.25);color:var(--emer);}
+
+.ncard{display:flex;gap:10px;align-items:center;background:var(--surface);
+  border:1px solid var(--border);border-radius:14px;padding:12px;margin:0 16px 8px;}
+.nicon{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;
+  justify-content:center;font-size:19px;flex-shrink:0;}
+.ntitle{font-size:13px;font-weight:700;color:var(--text);}
+.nsub{font-size:11px;color:var(--muted);margin-top:2px;}
+.ndist{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--blue);}
+
+/* ═══ SETUP PAGE ═══ */
+.setup-page{padding:0 16px;}
+.setup-step{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  padding:16px;margin-bottom:10px;position:relative;}
+.step-num{width:28px;height:28px;border-radius:50%;background:rgba(0,200,255,0.15);
+  border:1px solid rgba(0,200,255,0.3);color:var(--blue);font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;margin-bottom:8px;}
+.step-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;}
+.step-body{font-size:11px;color:var(--muted);line-height:1.7;}
+.code-block{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.07);
+  border-radius:10px;padding:10px 12px;margin-top:8px;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:#a8d8ea;
+  line-height:1.7;overflow-x:auto;white-space:pre;}
+.copy-btn{background:rgba(0,200,255,0.1);border:1px solid rgba(0,200,255,0.25);
+  border-radius:8px;padding:4px 10px;font-size:10px;color:var(--blue);
+  font-weight:600;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;
+  float:right;margin-top:-4px;}
+
+/* FIRESTORE RULES BLOCK */
+.rules-block{background:rgba(0,0,0,0.5);border:1px solid rgba(52,211,153,0.2);
+  border-radius:10px;padding:10px 12px;margin-top:8px;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:#a8f0c8;line-height:1.7;}
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <div class="notch"></div>
+  <div class="screen">
+
+    <!-- STATUS BAR -->
+    <div class="sbar">
+      <div class="sbar-time" id="clk">9:14</div>
+      <div class="sbar-r">
+        <span>●●●</span><span>WiFi</span><span>🔋</span>
+      </div>
+    </div>
+
+    <!-- FIREBASE STATUS BANNER -->
+    <div class="setup-banner" id="setupBanner">
+      <div class="setup-dot" id="setupDot"></div>
+      <span id="authStatus">Demo Mode — Firebase not configured. See Setup tab.</span>
+    </div>
+
+    <div class="app" id="appEl">
+
+      <!-- ═══════════ HOME ═══════════ -->
+      <div class="page active" id="pg-home">
+        <div class="hero">
+          <div class="greeting">Good Morning, Rajesh 👋</div>
+          <div class="hero-h">Erode City<br><span>Traffic Live</span></div>
+          <div class="loc-row">
+            <div class="loc-ping"></div>
+            <div class="loc-txt" id="locTxt">Detecting your location…</div>
+          </div>
+          <div class="stats-row">
+            <div class="stat-p"><div class="sv" style="color:var(--blue)" id="hVeh">—</div><div class="sl">Vehicles</div></div>
+            <div class="stat-p"><div class="sv" style="color:var(--orange)" id="hCong">—</div><div class="sl">Congestion</div></div>
+            <div class="stat-p"><div class="sv" style="color:var(--green)" id="hETA">—</div><div class="sl">Best ETA</div></div>
+          </div>
+        </div>
+
+        <!-- REAL LEAFLET MAP -->
+        <div class="shdr" style="margin-top:4px;"><div class="stitle">Live Map — Erode</div><div class="smore">Layers</div></div>
+        <div id="realMap"></div>
+
+        <!-- Quick actions -->
+        <div class="shdr"><div class="stitle">Quick Actions</div></div>
+        <div class="qgrid">
+          <div class="qbtn" onclick="goPage('routes')"><div class="qi">🗺</div><div class="ql">Routes</div></div>
+          <div class="qbtn" onclick="goPage('parking')"><div class="qi">🅿</div><div class="ql">Parking</div></div>
+          <div class="qbtn" onclick="goPage('reports')"><div class="qi">📡</div><div class="ql">Report</div></div>
+          <div class="qbtn" onclick="goPage('emergency')"><div class="qi">🚨</div><div class="ql">SOS</div></div>
+        </div>
+
+        <!-- Live alerts -->
+        <div class="shdr"><div class="stitle">Live Alerts</div><div class="smore">All</div></div>
+        <div class="aitem">
+          <div class="aicon" style="background:rgba(255,60,80,0.1);">🚑</div>
+          <div class="abody">
+            <div class="atitle">Ambulance — NH-544</div>
+            <div class="asub">Signal pre-emption active. Move left near Bus Stand.</div>
+            <div class="atime">2 min ago</div>
+          </div>
+          <div class="apill" style="background:rgba(255,60,80,0.12);color:var(--emer);border:1px solid rgba(255,60,80,0.25);">LIVE</div>
+        </div>
+        <div class="aitem">
+          <div class="aicon" style="background:rgba(251,191,36,0.09);">⚠️</div>
+          <div class="abody">
+            <div class="atitle">Accident — Perundurai Rd</div>
+            <div class="asub">2 lanes blocked. AI rerouting via Avinashi Road.</div>
+            <div class="atime">8 min ago</div>
+          </div>
+          <div class="apill" style="background:rgba(251,191,36,0.1);color:var(--yellow);border:1px solid rgba(251,191,36,0.2);">NEW</div>
+        </div>
+
+        <!-- Carbon -->
+        <div style="margin:4px 16px 8px;background:linear-gradient(135deg,rgba(52,211,153,0.07),rgba(0,200,255,0.05));border:1px solid rgba(52,211,153,0.18);border-radius:16px;padding:14px;">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">🌱 CO₂ Saved Today</div>
+          <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--green)" id="hCO2">2.4 kg</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">via smart routing choices</div>
+        </div>
+      </div>
+
+      <!-- ═══════════ ROUTES ═══════════ -->
+      <div class="page" id="pg-routes">
+        <div class="phdr"><div class="phdr-title">Smart Routes</div><div class="phdr-btn">🔍</div></div>
+        <div class="sbox"><span>📍</span><input class="sinput" placeholder="From: Current Location" readonly></div>
+        <div class="sbox"><span>🎯</span><input class="sinput" id="destIn" value="Government Hospital, Erode"></div>
+
+        <!-- REAL LEAFLET ROUTE MAP -->
+        <div id="routeMap"></div>
+
+        <div style="padding:0 16px 8px;font-size:11px;color:var(--muted);font-weight:600;">
+          3 ROUTES FOUND
+          <span id="routeUpdTime" style="color:#3a5a6a;font-weight:400;margin-left:8px;font-family:'JetBrains Mono',monospace;"></span>
+        </div>
+
+        <div class="rcard best" onclick="pickRoute(this,'AVINASHI ROAD')">
+          <div class="rname">Via Avinashi Road</div>
+          <div class="rmets">
+            <div><div class="rv" style="color:var(--green)" id="rt1">14 min</div><div class="rl">Duration</div></div>
+            <div><div class="rv" style="color:var(--green)">LOW</div><div class="rl">Traffic</div></div>
+            <div><div class="rv" style="color:var(--text)">8.2 km</div><div class="rl">Distance</div></div>
+            <div><div class="rv" style="color:var(--text)">0.8 L</div><div class="rl">Fuel</div></div>
+          </div>
+          <div class="cbar"><div class="cfill" style="width:20%;background:linear-gradient(90deg,var(--green),rgba(52,211,153,0.3));"></div></div>
+        </div>
+
+        <div class="rcard" onclick="pickRoute(this,'BYPASS ROAD')">
+          <div class="rname">Via Bypass Road</div>
+          <div class="rmets">
+            <div><div class="rv" style="color:var(--yellow)" id="rt2">18 min</div><div class="rl">Duration</div></div>
+            <div><div class="rv" style="color:var(--yellow)">MED</div><div class="rl">Traffic</div></div>
+            <div><div class="rv" style="color:var(--text)">11.1 km</div><div class="rl">Distance</div></div>
+            <div><div class="rv" style="color:var(--text)">1.0 L</div><div class="rl">Fuel</div></div>
+          </div>
+          <div class="cbar"><div class="cfill" style="width:52%;background:linear-gradient(90deg,var(--yellow),rgba(251,191,36,0.3));"></div></div>
+        </div>
+
+        <div class="rcard" onclick="pickRoute(this,'METTUR ROAD')">
+          <div class="rname">Via Mettur Road</div>
+          <div class="rmets">
+            <div><div class="rv" style="color:var(--orange)" id="rt3">22 min</div><div class="rl">Duration</div></div>
+            <div><div class="rv" style="color:var(--red)">HIGH</div><div class="rl">Traffic</div></div>
+            <div><div class="rv" style="color:var(--text)">9.6 km</div><div class="rl">Distance</div></div>
+            <div><div class="rv" style="color:var(--text)">1.1 L</div><div class="rl">Fuel</div></div>
+          </div>
+          <div class="cbar"><div class="cfill" style="width:76%;background:linear-gradient(90deg,var(--red),rgba(248,113,113,0.3));"></div></div>
+        </div>
+
+        <button class="cta-btn green" id="navCta" onclick="startNav()">🧭 &nbsp;Start — Avinashi Road</button>
+      </div>
+
+      <!-- ═══════════ REPORTS ═══════════ -->
+      <div class="page" id="pg-reports">
+        <div class="phdr"><div class="phdr-title">Report Traffic</div><div class="phdr-btn">📍</div></div>
+
+        <!-- Firebase status in reports -->
+        <div style="margin:0 16px 12px;padding:10px 12px;border-radius:12px;
+          background:rgba(0,0,0,0.2);border:1px solid var(--border);
+          font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);">
+          Firebase: <span id="fbStatusRep" style="color:var(--yellow);">Demo mode</span>
+          &nbsp;·&nbsp; Reports below are
+          <span id="fbReportMode" style="color:var(--yellow);">local only</span>
+        </div>
+
+        <div class="rtgrid">
+          <div class="rtbtn" style="background:rgba(255,60,80,0.06);border-color:rgba(255,60,80,0.2);" onclick="submitReport('ACCIDENT','🚨','red')">
+            <div class="rticon">🚨</div><div class="rtname">Accident</div><div class="rtsub">Collision / crash</div>
+          </div>
+          <div class="rtbtn" style="background:rgba(251,191,36,0.05);border-color:rgba(251,191,36,0.18);" onclick="submitReport('ROAD WORK','🚧','yellow')">
+            <div class="rticon">🚧</div><div class="rtname">Road Work</div><div class="rtsub">Construction zone</div>
+          </div>
+          <div class="rtbtn" style="background:rgba(251,146,60,0.05);border-color:rgba(251,146,60,0.18);" onclick="submitReport('TRAFFIC JAM','🚗','orange')">
+            <div class="rticon">🚗</div><div class="rtname">Traffic Jam</div><div class="rtsub">Heavy congestion</div>
+          </div>
+          <div class="rtbtn" style="background:rgba(0,200,255,0.04);border-color:rgba(0,200,255,0.14);" onclick="submitReport('HAZARD','⚠️','blue')">
+            <div class="rticon">⚠️</div><div class="rtname">Hazard</div><div class="rtsub">Pothole / debris</div>
+          </div>
+        </div>
+
+        <!-- Points -->
+        <div style="margin:0 16px 14px;background:linear-gradient(135deg,rgba(251,191,36,0.07),rgba(251,146,60,0.05));
+          border:1px solid rgba(251,191,36,0.18);border-radius:16px;padding:12px 14px;
+          display:flex;align-items:center;gap:10px;">
+          <div style="font-size:26px;">⭐</div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--yellow);">Reward Points</div>
+            <div style="font-family:'Syne',sans-serif;font-size:19px;font-weight:800;color:var(--text);" id="userPts">340 pts</div>
+            <div style="font-size:10px;color:var(--muted);">Rank #7 in Erode</div>
+          </div>
+          <div style="margin-left:auto;text-align:right;">
+            <div style="font-size:10px;color:var(--muted);">Per report</div>
+            <div style="font-size:13px;font-weight:700;color:var(--yellow);">+10 pts</div>
+          </div>
+        </div>
+
+        <div class="shdr"><div class="stitle">Live Community Feed</div></div>
+        <div id="reportFeed">
+          <!-- Seeded with demo data, real Firebase reports inject here -->
+          <div class="rfi">
+            <div class="rfi-icon" style="background:rgba(255,60,80,0.08);">🚨</div>
+            <div class="rfi-body">
+              <div class="rfi-title">ACCIDENT — NH-544 near Bus Stand</div>
+              <div class="rfi-sub">8 min ago · 1.2 km away · 43 confirmations</div>
+              <div class="rfi-row">
+                <button class="vote-sm" onclick="voteThis(this)">👍 43</button>
+                <span class="demo-badge">DEMO</span>
+              </div>
+            </div>
+          </div>
+          <div class="rfi">
+            <div class="rfi-icon" style="background:rgba(251,191,36,0.08);">🚧</div>
+            <div class="rfi-body">
+              <div class="rfi-title">ROAD WORK — Sathy Road</div>
+              <div class="rfi-sub">22 min ago · 3.4 km away · 12 confirmations</div>
+              <div class="rfi-row">
+                <button class="vote-sm" onclick="voteThis(this)">👍 12</button>
+                <span class="demo-badge">DEMO</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ PARKING ═══════════ -->
+      <div class="page" id="pg-parking">
+        <div class="phdr"><div class="phdr-title">Smart Parking</div>
+          <div class="phdr-btn" id="parkRefBtn" onclick="refreshPark()">🔄</div>
+        </div>
+        <div style="padding:0 16px 10px;font-size:11px;color:var(--muted);">
+          📍 Near Erode Collectorate
+          <span style="float:right;font-family:'JetBrains Mono',monospace;font-size:10px;color:#3a5a6a;" id="parkTime">Live</span>
+        </div>
+        <div class="pzones" id="pzones">
+          <div class="pzone sel" onclick="pickZone(this,'A')">
+            <div class="pz-name">ZONE A</div>
+            <div class="pz-val" id="zA" style="color:var(--green);">34</div>
+            <div class="pz-lbl">Free / 60</div>
+            <div class="pz-bar"><div class="pz-fill" id="zAbar" style="width:43%;background:var(--green);"></div></div>
+          </div>
+          <div class="pzone" onclick="pickZone(this,'B')">
+            <div class="pz-name">ZONE B</div>
+            <div class="pz-val" id="zB" style="color:var(--yellow);">8</div>
+            <div class="pz-lbl">Free / 50</div>
+            <div class="pz-bar"><div class="pz-fill" id="zBbar" style="width:84%;background:var(--orange);"></div></div>
+          </div>
+          <div class="pzone" onclick="pickZone(this,'C')">
+            <div class="pz-name">ZONE C</div>
+            <div class="pz-val" id="zC" style="color:var(--red);">2</div>
+            <div class="pz-lbl">Free / 40</div>
+            <div class="pz-bar"><div class="pz-fill" id="zCbar" style="width:95%;background:var(--red);"></div></div>
+          </div>
+        </div>
+        <div style="padding:0 16px 8px;font-size:11px;font-weight:600;color:var(--muted);">ZONE A — TAP GREEN SLOT TO SELECT</div>
+        <div class="slotgrid" id="slotGrid"></div>
+        <div style="padding:0 16px 10px;display:flex;gap:10px;font-size:10px;font-weight:700;">
+          <span style="color:var(--green);">■ FREE</span>
+          <span style="color:var(--red);">■ TAKEN</span>
+          <span style="color:var(--yellow);">■ RESERVED</span>
+          <span style="color:var(--blue);">■ SELECTED</span>
+        </div>
+        <div style="margin:0 16px 12px;padding:12px 14px;background:rgba(0,200,255,0.05);
+          border:1px solid rgba(0,200,255,0.12);border-radius:14px;">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">Selected</div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);" id="selSlot">Tap a green slot above</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">₹40/hr · UPI / Card / Wallet</div>
+        </div>
+        <button class="cta-btn" onclick="bookSlot()">Confirm Booking & Pay ₹40/hr</button>
+      </div>
+
+      <!-- ═══════════ EMERGENCY ═══════════ -->
+      <div class="page" id="pg-emergency">
+        <div class="phdr"><div class="phdr-title">Emergency</div><div class="phdr-btn">🔔</div></div>
+        <div class="emer-card active-emer" id="emerCard">
+          <div class="etag"><div class="etag-dot"></div>EMERGENCY ACTIVE</div>
+          <div class="eveh" id="emerVeh">🚑 Ambulance — TN-33-BA-1122</div>
+          <div class="esub" id="emerSub">KMCH Hospital → Govt Hospital · ETA 6 min · Please clear NH-544</div>
+          <div class="eroute">
+            <div class="enode">KMCH</div><span style="color:var(--emer);">→</span>
+            <div class="enode">NH-544</div><span style="color:var(--emer);">→</span>
+            <div class="enode">Bus Stand</div><span style="color:var(--emer);">→</span>
+            <div class="enode">Govt Hosp</div>
+          </div>
+          <div class="ebts">
+            <button class="ebt ebt-p" onclick="clearLane()">🚨 Clear My Lane</button>
+            <button class="ebt ebt-s" onclick="trackVeh()">📍 Track</button>
+          </div>
+        </div>
+
+        <div class="shdr"><div class="stitle">Nearby Services</div></div>
+        <div class="ncard">
+          <div class="nicon" style="background:rgba(255,60,80,0.1);">🏥</div>
+          <div style="flex:1;"><div class="ntitle">Govt Hospital Erode</div><div class="nsub">Trauma & Emergency</div></div>
+          <div class="ndist">1.4 km</div>
+        </div>
+        <div class="ncard">
+          <div class="nicon" style="background:rgba(251,146,60,0.1);">🚒</div>
+          <div style="flex:1;"><div class="ntitle">Fire Station — Erode</div><div class="nsub">Response ~4 min</div></div>
+          <div class="ndist">2.1 km</div>
+        </div>
+        <div class="ncard">
+          <div class="nicon" style="background:rgba(99,102,241,0.1);">👮</div>
+          <div style="flex:1;"><div class="ntitle">Erode Police Station</div><div class="nsub">Traffic Control Unit</div></div>
+          <div class="ndist">800 m</div>
+        </div>
+
+        <div style="margin:8px 16px 12px;">
+          <button style="width:100%;background:linear-gradient(135deg,var(--emer),#cc0020);
+            border:none;border-radius:16px;padding:15px;font-size:14px;font-weight:800;
+            color:#fff;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;
+            box-shadow:0 6px 20px rgba(255,60,80,0.3);letter-spacing:0.3px;" onclick="sos()">
+            🆘 &nbsp;SOS Emergency Alert
+          </button>
+        </div>
+      </div>
+
+      <!-- ═══════════ SETUP GUIDE ═══════════ -->
+      <div class="page" id="pg-setup">
+        <div class="phdr"><div class="phdr-title">Setup Guide</div></div>
+        <div class="setup-page">
+
+          <div style="margin-bottom:14px;padding:12px 14px;background:rgba(0,200,255,0.06);border:1px solid rgba(0,200,255,0.2);border-radius:14px;font-size:11px;color:var(--muted);line-height:1.7;">
+            Follow these steps to make the app fully real with <span style="color:var(--blue);">Firebase</span> + <span style="color:var(--green);">Real Maps</span>. All free. No cost for small usage.
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">1</div>
+            <div class="step-title">Create Firebase Project (Free)</div>
+            <div class="step-body">
+              Go to <span style="color:var(--blue);">console.firebase.google.com</span><br>
+              → Create a project → Add a Web App<br>
+              → Copy the config object shown
+            </div>
+            <div class="code-block">// firebase config you get
+const firebaseConfig = {
+  apiKey: "AIzaSy...",
+  authDomain: "yourapp.firebaseapp.com",
+  projectId: "yourapp-12345",
+  storageBucket: "yourapp.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123:web:abc123"
+};</div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">2</div>
+            <div class="step-title">Enable Firebase Services</div>
+            <div class="step-body">
+              In Firebase Console, enable:<br>
+              → <span style="color:var(--green);">Authentication</span> → Anonymous sign-in ✓<br>
+              → <span style="color:var(--green);">Firestore Database</span> → Create database<br>
+              → <span style="color:var(--green);">Start in test mode</span> (for development)
+            </div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">3</div>
+            <div class="step-title">Set Firestore Security Rules</div>
+            <div class="step-body">In Firestore → Rules tab, paste this:</div>
+            <div class="rules-block">rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // Anyone can read reports
+    match /traffic_reports/{doc} {
+      allow read: if true;
+      // Only authenticated users can write
+      allow write: if request.auth != null;
+    }
+
+    // Emergencies — read only for public
+    match /emergencies/{doc} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}</div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">4</div>
+            <div class="step-title">Paste Your Config Into This File</div>
+            <div class="step-body">In this HTML file, find the firebaseConfig object (near top of &lt;script type="module"&gt;) and replace the placeholder values with your real config from Step 1.</div>
+            <div class="code-block">// Replace these placeholders:
+apiKey: "YOUR_API_KEY",       ← paste real
+projectId: "YOUR_PROJECT_ID", ← paste real
+// ... etc</div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">5</div>
+            <div class="step-title">Real Traffic Data (Optional Upgrade)</div>
+            <div class="step-body">
+              For live congestion data, sign up free at:<br>
+              → <span style="color:var(--blue);">developer.tomtom.com</span> (2,500 calls/day free)<br>
+              → Replace the mock API values with:
+            </div>
+            <div class="code-block">// Real TomTom traffic API call
+const ERODE = '11.3410,77.7172';
+const res = await fetch(
+  `https://api.tomtom.com/traffic/services/4/` +
+  `flowSegmentData/absolute/10/json?` +
+  `point=${ERODE}&key=YOUR_TOMTOM_KEY`
+);
+const d = await res.json();
+const speed = d.flowSegmentData.currentSpeed;
+const freeFlow = d.flowSegmentData.freeFlowSpeed;
+const congestion = 1 - (speed / freeFlow);
+setCongestion(Math.round(congestion * 100));</div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">6</div>
+            <div class="step-title">Make It Installable (PWA)</div>
+            <div class="step-body">Add these files alongside your HTML to make it installable on any phone — no app store needed:</div>
+            <div class="code-block">// manifest.json
+{
+  "name": "NEXUS Traffic",
+  "short_name": "NEXUS",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0d1421",
+  "theme_color": "#00c8ff",
+  "icons": [{
+    "src": "icon-192.png",
+    "sizes": "192x192"
+  }]
+}
+
+// In your HTML &lt;head&gt;:
+&lt;link rel="manifest" href="manifest.json"&gt;
+&lt;meta name="theme-color" content="#0d1421"&gt;</div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-num">7</div>
+            <div class="step-title">Host It Free (Firebase Hosting)</div>
+            <div class="step-body">
+              Install Firebase CLI and deploy:
+            </div>
+            <div class="code-block"># In your terminal:
+npm install -g firebase-tools
+firebase login
+firebase init hosting
+firebase deploy
+
+# Your app is now live at:
+# https://yourapp.web.app  ✅</div>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /app -->
+
+    <!-- BOTTOM NAV -->
+    <div class="bnav">
+      <div class="ni active" id="nav-home" onclick="goPage('home')">
+        <div class="ni-icon">🏠</div><div class="ni-lbl">Home</div>
+      </div>
+      <div class="ni" id="nav-routes" onclick="goPage('routes')">
+        <div class="ni-icon">🗺</div><div class="ni-lbl">Routes</div>
+      </div>
+      <div class="ni" id="nav-reports" onclick="goPage('reports')">
+        <div class="ni-icon" style="position:relative;">📡<span class="nbadge" id="reportBadge">2</span></div>
+        <div class="ni-lbl">Report</div>
+      </div>
+      <div class="ni" id="nav-parking" onclick="goPage('parking')">
+        <div class="ni-icon">🅿</div><div class="ni-lbl">Parking</div>
+      </div>
+      <div class="ni" id="nav-emergency" onclick="goPage('emergency')">
+        <div class="ni-icon" style="position:relative;">🚨<span class="nbadge">1</span></div>
+        <div class="ni-lbl">SOS</div>
+      </div>
+      <div class="ni" id="nav-setup" onclick="goPage('setup')">
+        <div class="ni-icon">⚙️</div><div class="ni-lbl">Setup</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════
+//  CLOCK
+// ════════════════════════════════════
+function tick(){
+  document.getElementById('clk').textContent =
+    new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+setInterval(tick,1000); tick();
+
+// ════════════════════════════════════
+//  NAVIGATION
+// ════════════════════════════════════
+let mapsInit = {};
+function goPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  document.getElementById('pg-'+name).classList.add('active');
+  document.getElementById('nav-'+name).classList.add('active');
+  document.getElementById('appEl').scrollTop=0;
+
+  if(name==='home' && !mapsInit.home) initHomeMap();
+  if(name==='routes' && !mapsInit.routes) initRouteMap();
+  if(name==='parking') buildSlots();
+}
+
+// ════════════════════════════════════
+//  REAL LEAFLET MAP — HOME
+// ════════════════════════════════════
+function initHomeMap() {
+  mapsInit.home = true;
+  // Erode city centre coordinates
+  const ERODE = [11.3410, 77.7172];
+  const map = L.map('realMap', {
+    center: ERODE,
+    zoom: 13,
+    zoomControl: false,
+    attributionControl: false
+  });
+
+  // OpenStreetMap tiles (100% free, no API key needed)
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18
+  }).addTo(map);
+
+  // User location marker
+  const userIcon = L.divIcon({
+    html: '<div style="width:16px;height:16px;border-radius:50%;background:#00c8ff;border:3px solid #fff;box-shadow:0 0 12px #00c8ff;"></div>',
+    iconSize: [16,16], iconAnchor: [8,8], className: ''
+  });
+  L.marker(ERODE, {icon: userIcon}).addTo(map).bindPopup('📍 Your Location — Erode');
+
+  // Traffic incident markers
+  const incidents = [
+    { pos:[11.3500, 77.7250], icon:'🚨', label:'Accident — NH-544', color:'#ff3c50' },
+    { pos:[11.3350, 77.7100], icon:'🚧', label:'Road Work — Perundurai Rd', color:'#fbbf24' },
+    { pos:[11.3460, 77.7320], icon:'🅿',  label:'Parking Zone A — 34 free', color:'#34d399' },
+  ];
+  incidents.forEach(inc => {
+    const icon = L.divIcon({
+      html: `<div style="font-size:18px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">${inc.icon}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12], className: ''
+    });
+    L.marker(inc.pos, {icon}).addTo(map).bindPopup(`<b>${inc.label}</b>`);
+  });
+
+  // Try get real GPS location
+  if(navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const {latitude, longitude} = pos.coords;
+      map.setView([latitude, longitude], 14);
+      L.marker([latitude, longitude], {icon: userIcon}).addTo(map)
+        .bindPopup('📍 Your Real GPS Location');
+      document.getElementById('locTxt').textContent =
+        `GPS: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+    }, () => {
+      document.getElementById('locTxt').textContent = 'Erode City Centre (GPS unavailable)';
+    });
+  }
+
+  // Refresh map size
+  setTimeout(() => map.invalidateSize(), 200);
+}
+
+// ════════════════════════════════════
+//  REAL LEAFLET MAP — ROUTES
+// ════════════════════════════════════
+function initRouteMap() {
+  mapsInit.routes = true;
+  const ERODE = [11.3410, 77.7172];
+  const map = L.map('routeMap', {
+    center: [11.3430, 77.7220],
+    zoom: 13,
+    zoomControl: false,
+    attributionControl: false
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18}).addTo(map);
+
+  // Simulated route polylines on real map
+  // Route 1 — Green (Avinashi Road — best)
+  const r1 = [[11.3410,77.7172],[11.3440,77.7200],[11.3480,77.7260],[11.3520,77.7310],[11.3560,77.7350]];
+  L.polyline(r1, {color:'#34d399', weight:4, opacity:0.85}).addTo(map);
+
+  // Route 2 — Yellow (Bypass)
+  const r2 = [[11.3410,77.7172],[11.3380,77.7190],[11.3360,77.7240],[11.3400,77.7300],[11.3560,77.7350]];
+  L.polyline(r2, {color:'#fbbf24', weight:3, opacity:0.6, dashArray:'8,5'}).addTo(map);
+
+  // Route 3 — Red (Mettur Road — congested)
+  const r3 = [[11.3410,77.7172],[11.3430,77.7140],[11.3470,77.7180],[11.3510,77.7280],[11.3560,77.7350]];
+  L.polyline(r3, {color:'#f87171', weight:3, opacity:0.5, dashArray:'5,7'}).addTo(map);
+
+  // Origin & destination markers
+  const startIcon = L.divIcon({html:'<div style="font-size:20px;">📍</div>',iconSize:[24,24],iconAnchor:[12,20],className:''});
+  const endIcon = L.divIcon({html:'<div style="font-size:20px;">🎯</div>',iconSize:[24,24],iconAnchor:[12,20],className:''});
+  L.marker([11.3410,77.7172],{icon:startIcon}).addTo(map).bindPopup('Start: Your Location');
+  L.marker([11.3560,77.7350],{icon:endIcon}).addTo(map).bindPopup('Destination: Govt Hospital');
+
+  document.getElementById('routeUpdTime').textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  setTimeout(() => map.invalidateSize(), 200);
+}
+
+// ════════════════════════════════════
+//  LIVE DATA (Mock API for non-Firebase fields)
+// ════════════════════════════════════
+function updateLiveStats() {
+  const v = 13800 + Math.floor(Math.random()*900);
+  const c = 58 + Math.floor(Math.random()*22);
+  const e = 12 + Math.floor(Math.random()*6);
+  const hv = document.getElementById('hVeh');
+  const hc = document.getElementById('hCong');
+  const he = document.getElementById('hETA');
+  if(hv) hv.textContent = v.toLocaleString('en-IN');
+  if(hc){ hc.textContent = c+'%'; hc.style.color = c>75?'var(--red)':c>55?'var(--orange)':'var(--yellow)'; }
+  if(he) he.textContent = e+' min';
+  // Route times
+  const b = 12 + Math.floor(Math.random()*5);
+  const r1=document.getElementById('rt1'), r2=document.getElementById('rt2'), r3=document.getElementById('rt3');
+  if(r1) r1.textContent = b+' min';
+  if(r2) r2.textContent = (b+5+Math.floor(Math.random()*4))+' min';
+  if(r3) r3.textContent = (b+9+Math.floor(Math.random()*5))+' min';
+  // CO2
+  const co2 = document.getElementById('hCO2');
+  if(co2) co2.textContent = (2+Math.random()).toFixed(1)+' kg';
+}
+setInterval(updateLiveStats, 4000);
+updateLiveStats();
+
+// ════════════════════════════════════
+//  PARKING
+// ════════════════════════════════════
+function buildSlots() {
+  const g = document.getElementById('slotGrid'); g.innerHTML='';
+  const states='FTTFFTFTRTFFTTFFTFFTRTFFFT'.split('').map(c=>c==='F'?'free':c==='T'?'taken':'reserved');
+  states.forEach((s,i) => {
+    const b = document.createElement('button');
+    b.className = 'slot '+s;
+    b.dataset.i = i;
+    b.textContent = s==='taken' ? '' : 'A'+String(i+1).padStart(2,'0');
+    if(s==='free') b.onclick = () => {
+      document.querySelectorAll('.slot.sel').forEach(x=>x.classList.remove('sel'));
+      b.classList.add('sel');
+      document.getElementById('selSlot').textContent = 'Slot A'+String(i+1).padStart(2,'0')+' — Ground Floor, Zone A';
+    };
+    g.appendChild(b);
+  });
+  document.getElementById('parkTime').textContent = 'Live · '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+}
+
+function pickZone(el) {
+  document.querySelectorAll('.pzone').forEach(z=>z.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
+function refreshPark() {
+  const btn = document.getElementById('parkRefBtn');
+  btn.textContent='⏳';
+  setTimeout(()=>{ btn.textContent='🔄'; buildSlots(); },700);
+}
+
+function bookSlot() {
+  const sel = document.querySelector('.slot.sel');
+  if(!sel){ alert('Please tap a free (green) slot first!'); return; }
+  alert(`✅ Booking Confirmed!\n\n${document.getElementById('selSlot').textContent}\n₹40/hr · UPI Payment\nSlot held 10 min\n\nNavigate: Turn right at Collectorate signal`);
+}
+
+// ════════════════════════════════════
+//  ROUTES
+// ════════════════════════════════════
+function pickRoute(el, name) {
+  document.querySelectorAll('.rcard').forEach(c=>c.classList.remove('best'));
+  el.classList.add('best');
+  document.getElementById('navCta').textContent = '🧭   Start — '+name;
+}
+function startNav(){ alert('🧭 Navigation started!\nFollowing selected route\nAI monitoring for live updates…'); }
+
+// ════════════════════════════════════
+//  REPORTS — FIREBASE INTEGRATION
+// ════════════════════════════════════
+let userPoints = 340;
+let reportCount = 2;
+
+// This function is called by Firebase listener (module script) when new real reports arrive
+window.addReportToFeed = function(data) {
+  const feed = document.getElementById('reportFeed');
+  const icons = {'ACCIDENT':'🚨','ROAD WORK':'🚧','TRAFFIC JAM':'🚗','HAZARD':'⚠️'};
+  const icon = icons[data.type] || '📍';
+  const colors = {'ACCIDENT':'rgba(255,60,80,0.08)','ROAD WORK':'rgba(251,191,36,0.07)',
+                  'TRAFFIC JAM':'rgba(251,146,60,0.07)','HAZARD':'rgba(0,200,255,0.06)'};
+  const bg = colors[data.type] || 'rgba(255,255,255,0.05)';
+  const ts = data.timestamp?.seconds
+    ? new Date(data.timestamp.seconds*1000).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})
+    : 'just now';
+
+  const div = document.createElement('div');
+  div.className = 'rfi';
+  div.style.animation = 'fadeUp 0.3s ease';
+  div.innerHTML = `
+    <div class="rfi-icon" style="background:${bg};">${icon}</div>
+    <div class="rfi-body">
+      <div class="rfi-title">${data.type} — ${data.location||'Erode'}</div>
+      <div class="rfi-sub">${ts} · from ${data.isReal?'real user':'you'}</div>
+      <div class="rfi-row">
+        <button class="vote-sm" onclick="voteThis(this)">👍 1</button>
+        ${data.isReal
+          ? '<span class="real-badge">🔥 LIVE FIREBASE</span>'
+          : '<span class="demo-badge">LOCAL</span>'}
+      </div>
+    </div>`;
+  feed.insertBefore(div, feed.firstChild);
+  reportCount++;
+  document.getElementById('reportBadge').textContent = reportCount;
+  if(window.isFirebaseReady){
+    document.getElementById('fbStatusRep').textContent = 'Connected ✓';
+    document.getElementById('fbStatusRep').style.color='var(--green)';
+    document.getElementById('fbReportMode').textContent='synced with all users';
+    document.getElementById('fbReportMode').style.color='var(--green)';
+  }
+};
+
+async function submitReport(type, icon, color) {
+  const locs = ['Gandhipuram Rd','NH-544','Sathy Rd','Race Course','Perundurai Rd'];
+  const loc = locs[Math.floor(Math.random()*locs.length)];
+
+  if(window.isFirebaseReady && window.firebaseDB) {
+    // ── REAL FIREBASE WRITE ──
+    try {
+      const { collection, addDoc, serverTimestamp } = window.firebaseCollections;
+      await addDoc(collection(window.firebaseDB, 'traffic_reports'), {
+        type, icon, location: loc,
+        timestamp: serverTimestamp(),
+        votes: 1,
+        userId: 'anon'
+      });
+      userPoints += 10;
+      document.getElementById('userPts').textContent = userPoints+' pts';
+      showToast('✅ Report saved to Firebase! +10 pts');
+    } catch(e) {
+      console.error('Firebase write failed:', e);
+      localReport(type, icon, loc);
+    }
+  } else {
+    // Demo mode — local only
+    localReport(type, icon, loc);
+  }
+  if(navigator.vibrate) navigator.vibrate([40,20,40]);
+}
+
+function localReport(type, icon, loc) {
+  userPoints += 10;
+  document.getElementById('userPts').textContent = userPoints+' pts';
+  window.addReportToFeed({ type, icon, location: loc, isReal: false });
+  showToast('📤 Report submitted (demo mode) +10 pts');
+}
+
+function voteThis(btn) {
+  const n = parseInt(btn.textContent.replace(/\D/g,''));
+  btn.textContent = '👍 '+(n+1);
+  btn.style.background='rgba(52,211,153,0.12)';
+  btn.style.borderColor='rgba(52,211,153,0.3)';
+  btn.style.color='var(--green)';
+  userPoints += 2;
+  document.getElementById('userPts').textContent = userPoints+' pts';
+}
+
+// ════════════════════════════════════
+//  EMERGENCY
+// ════════════════════════════════════
+// This is called by Firebase listener when new emergency is detected
+window.showEmergencyAlert = function(data) {
+  document.getElementById('emerVeh').textContent = (data.icon||'🚑')+' '+(data.vehicle||'Unknown');
+  document.getElementById('emerSub').textContent = `${data.from||'—'} → ${data.to||'—'} · ETA ${data.eta||'?'} min`;
+  document.getElementById('emerCard').classList.add('active-emer');
+  document.querySelector('.nbadge').style.background='var(--emer)';
+  showToast('🚨 EMERGENCY: '+data.vehicle+' detected on your route!');
+};
+
+function clearLane() {
+  if(navigator.vibrate) navigator.vibrate([80,40,80,40,160]);
+  showToast('✅ Lane cleared — thank you! 247 nearby drivers notified.');
+}
+function trackVeh(){ showToast('📍 Tracking TN-33-BA-1122 · 400m from Bus Stand · ETA 4 min'); }
+function sos() {
+  if(navigator.vibrate) navigator.vibrate([200,100,200,100,500]);
+  alert('🆘 SOS ALERT SENT!\n\nShared with:\n• Erode Police Control Room\n• Nearest Ambulance (1.2 km)\n• Emergency Contacts\n\nHelp is on the way. Stay calm.');
+}
+
+// ════════════════════════════════════
+//  TOAST NOTIFICATION
+// ════════════════════════════════════
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = `
+    position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
+    background:rgba(13,17,23,0.96);border:1px solid rgba(255,255,255,0.12);
+    backdrop-filter:blur(16px);border-radius:12px;padding:10px 16px;
+    font-size:12px;font-weight:600;color:#e0eef8;z-index:9999;
+    max-width:320px;text-align:center;
+    animation:fadeUp 0.25s ease;box-shadow:0 8px 24px rgba(0,0,0,0.5);`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
+
+// ════════════════════════════════════
+//  INIT
+// ════════════════════════════════════
+initHomeMap();
+buildSlots();
+
+// Show setup banner state
+setTimeout(()=>{
+  if(window.isFirebaseReady){
+    document.getElementById('setupBanner').classList.add('connected');
+    document.getElementById('setupDot').classList.add('live');
+    document.getElementById('authStatus').textContent = 'Firebase connecting…';
+  } else {
+    document.getElementById('authStatus').textContent =
+      'Demo mode — tap ⚙️ Setup tab to connect Firebase';
+  }
+}, 500);
+</script>
+
+</body>
+</html>
