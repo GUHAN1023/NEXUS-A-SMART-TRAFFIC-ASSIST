@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS — Smart City Traffic Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<link href="https://db.onlinewebfonts.com/c/249452a852ade197f762e8804186dc6b?family=Phage+Regular" rel="stylesheet" type="text/css"/>
+<link href="https://db.onlinewebfonts.com/c/a0ad88db9143083e90b4dd56f9048334?family=Anurati" rel="stylesheet" type="text/css"/>
+<style>
+  :root {
+    --bg:#faf6f1;--surface:#fff8f0;--surface2:#f5ede4;
+    --accent:#6b4226;--accent2:#a0522d;--accent3:#8b6914;
+    --warn:#c68e17;--danger:#a52a2a;--text:#3e2723;--muted:#8d6e63;
+    --border:rgba(107,66,38,0.18);--glow:0 0 20px rgba(107,66,38,0.15);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:'Phage Regular','IBM Plex Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
+  /* Subtle ambient gradient that slowly drifts across the background */
+  body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 20% 80%,rgba(139,90,43,0.04),transparent 60%),radial-gradient(ellipse 60% 50% at 80% 20%,rgba(160,82,45,0.03),transparent 50%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(107,66,38,0.02),transparent 40%);pointer-events:none;z-index:0;animation:ambientDrift 20s ease-in-out infinite alternate;}
+  @keyframes ambientDrift{0%{opacity:0.6;transform:scale(1);}50%{opacity:1;transform:scale(1.05);}100%{opacity:0.7;transform:scale(1.02) translateX(2%);}}
+  body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(107,66,38,0.008) 2px,rgba(107,66,38,0.008) 4px);pointer-events:none;z-index:9999;opacity:0.3;}
+
+  /* GPS INIT OVERLAY */
+  #gpsOverlay{position:fixed;inset:0;background:var(--bg);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;}
+  #gpsOverlay.hidden{display:none;}
+  .gps-logo{font-family:'Anurati',monospace;font-size:2.5rem;font-weight:900;color:var(--accent);letter-spacing:6px;text-shadow:var(--glow);}
+  .gps-logo span{color:var(--accent2);}
+  .gps-spin{width:58px;height:58px;border:3px solid rgba(107,66,38,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin 0.9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .gps-status{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--muted);letter-spacing:2px;text-align:center;max-width:380px;line-height:1.9;}
+  .gps-status span{color:var(--accent);}
+  #gpsDenyBtn{background:rgba(107,66,38,0.07);border:1px solid var(--border);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:0.68rem;letter-spacing:1px;padding:9px 22px;border-radius:4px;cursor:pointer;transition:all 0.2s;display:none;}
+  #gpsDenyBtn:hover{background:rgba(107,66,38,0.15);}
+
+  /* API STATUS BAR */
+  #api-bar{background:rgba(107,66,38,0.05);border-bottom:1px solid rgba(107,66,38,0.12);padding:5px 32px;display:flex;align-items:center;gap:20px;font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);}
+  .api-dot{width:7px;height:7px;border-radius:50%;background:var(--accent3);box-shadow:0 0 6px rgba(139,105,20,0.4);animation:blink 1s infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  .api-stat{color:var(--accent);}
+  .api-ping{margin-left:auto;display:flex;gap:4px;align-items:center;}
+  #ping-val{color:var(--accent);}
+
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 32px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(107,66,38,0.06),transparent);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);background-color:rgba(250,246,241,0.92);}
+  .logo{font-family:'Anurati',monospace;font-size:1.5rem;font-weight:900;color:var(--accent);letter-spacing:4px;text-shadow:var(--glow);animation:logoBreathe 4s ease-in-out infinite alternate;}
+  @keyframes logoBreathe{0%{text-shadow:0 0 15px rgba(107,66,38,0.1);}100%{text-shadow:0 0 25px rgba(107,66,38,0.2),0 0 50px rgba(107,66,38,0.05);}}
+  .logo span{color:var(--accent2);}
+  .header-right{display:flex;gap:20px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--muted);}
+  .live-badge{background:rgba(139,105,20,0.1);border:1px solid rgba(139,105,20,0.35);color:var(--accent3);padding:3px 10px;border-radius:4px;font-size:0.68rem;letter-spacing:2px;display:flex;align-items:center;gap:6px;animation:liveBreathe 3s ease-in-out infinite alternate;}
+  @keyframes liveBreathe{0%{box-shadow:0 0 4px rgba(139,105,20,0.1);}100%{box-shadow:0 0 12px rgba(139,105,20,0.2);}}
+  .time-display{font-family:'Phage Regular',monospace;font-size:0.9rem;color:var(--accent);}
+
+  nav{display:flex;padding:0 32px;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto;position:relative;}
+  nav button{background:none;border:none;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;letter-spacing:1.5px;padding:13px 20px;cursor:pointer;text-transform:uppercase;border-bottom:2px solid transparent;transition:color 0.35s ease, background 0.35s ease, border-bottom-color 0.35s ease, transform 0.15s ease;white-space:nowrap;position:relative;overflow:hidden;}
+  nav button:hover{color:var(--text);background:rgba(107,66,38,0.05);}
+  nav button:active{transform:scale(0.96);}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(107,66,38,0.06);}
+  nav button.active::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);box-shadow:0 0 8px rgba(107,66,38,0.3);animation:navGlow 1.5s ease infinite alternate;}
+  @keyframes navGlow{0%{box-shadow:0 0 4px rgba(107,66,38,0.2);}100%{box-shadow:0 0 12px rgba(107,66,38,0.3),0 0 20px rgba(107,66,38,0.1);}}
+
+  /* Ripple effect for buttons */
+  .ripple-wrap{position:relative;overflow:hidden;}
+  .ripple{position:absolute;border-radius:50%;background:rgba(107,66,38,0.15);transform:scale(0);animation:rippleAnim 0.6s ease-out forwards;pointer-events:none;}
+  @keyframes rippleAnim{to{transform:scale(4);opacity:0;}}
+
+  main{padding:20px 32px;}
+  .panel{display:none;opacity:0;transform:translateY(18px) scale(0.98);}
+  .panel.active{display:block;opacity:1;transform:none;}
+  .panel.panel-enter{animation:panelSlideIn 0.45s cubic-bezier(0.22,1,0.36,1) forwards;}
+  .panel.panel-exit{animation:panelSlideOut 0.3s cubic-bezier(0.55,0,1,0.45) forwards;}
+  @keyframes panelSlideIn{0%{opacity:0;transform:translateY(22px) scale(0.97);}100%{opacity:1;transform:translateY(0) scale(1);}}
+  @keyframes panelSlideOut{0%{opacity:1;transform:translateY(0) scale(1);}100%{opacity:0;transform:translateY(-14px) scale(0.97);}}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px;}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px;}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .grid-main{display:grid;grid-template-columns:1fr 320px;gap:14px;}
+  .col{display:flex;flex-direction:column;gap:14px;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px;position:relative;overflow:hidden;transition:transform 0.35s cubic-bezier(0.22,1,0.36,1),box-shadow 0.4s ease,border-color 0.35s ease;}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 30px rgba(107,66,38,0.1),0 0 20px rgba(107,66,38,0.05);border-color:rgba(107,66,38,0.25);}
+  .card::before{content:'';position:absolute;top:0;left:0;width:2px;height:100%;background:var(--accent);transition:width 0.35s ease,opacity 0.35s ease;}
+  .card:hover::before{width:3px;opacity:0.9;}
+  .card.orange::before{background:var(--accent2);}
+  .card.green::before{background:var(--accent3);}
+  .card.warn::before{background:var(--warn);}
+  .card.danger::before{background:var(--danger);}
+  .card.orange:hover{box-shadow:0 8px 25px rgba(160,82,45,0.12),0 0 15px rgba(160,82,45,0.06);border-color:rgba(160,82,45,0.3);}
+  .card.green:hover{box-shadow:0 8px 25px rgba(139,105,20,0.12),0 0 15px rgba(139,105,20,0.06);border-color:rgba(139,105,20,0.3);}
+  .card.danger:hover{box-shadow:0 8px 25px rgba(165,42,42,0.12),0 0 15px rgba(165,42,42,0.06);border-color:rgba(165,42,42,0.3);}
+
+  /* Staggered card entry animation */
+  .card-animate{opacity:0;transform:translateY(16px) scale(0.97);}
+  .card-animate.card-visible{animation:cardPopIn 0.5s cubic-bezier(0.22,1,0.36,1) forwards;}
+  @keyframes cardPopIn{0%{opacity:0;transform:translateY(16px) scale(0.97);}100%{opacity:1;transform:translateY(0) scale(1);}}
+
+  .card-label{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+  .card-value{font-family:'Phage Regular',monospace;font-size:1.75rem;font-weight:700;color:var(--accent);line-height:1;}
+  .card-value.orange{color:var(--accent2);}
+  .card-value.green{color:var(--accent3);}
+  .card-value.warn{color:var(--warn);}
+  .card-value.danger{color:var(--danger);}
+  .card-sub{font-size:0.7rem;color:var(--muted);margin-top:5px;}
+
+  @keyframes flash{0%{background:rgba(107,66,38,0.08);}100%{background:transparent;}}
+  .flash{animation:flash 0.6s ease;}
+  @keyframes flashOrange{0%{background:rgba(160,82,45,0.1);}100%{background:transparent;}}
+  .flash-orange{animation:flashOrange 0.6s ease;}
+
+  .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;letter-spacing:2px;color:var(--accent);text-transform:uppercase;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;}
+  .section-title{font-family:'Phage Regular',monospace;font-size:0.82rem;font-weight:700;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:18px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+  .badge{background:rgba(107,66,38,0.08);border:1px solid rgba(107,66,38,0.25);color:var(--accent);font-size:0.62rem;padding:3px 9px;border-radius:4px;letter-spacing:1px;}
+
+  .progress-bar{height:5px;background:rgba(107,66,38,0.08);border-radius:3px;overflow:hidden;margin-top:7px;}
+  .progress-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),rgba(107,66,38,0.3));transition:width 1.2s ease;}
+  .progress-fill.orange{background:linear-gradient(90deg,var(--accent2),rgba(160,82,45,0.3));}
+  .progress-fill.danger{background:linear-gradient(90deg,var(--danger),rgba(165,42,42,0.3));}
+  .progress-fill.green{background:linear-gradient(90deg,var(--accent3),rgba(139,105,20,0.3));}
+
+  .map-wrap{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:18px;}
+  #tempGraphCanvas{width:100%;height:240px;display:block;border-radius:6px;}
+
+  .signal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .sig-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;transition:transform 0.35s cubic-bezier(0.22,1,0.36,1),box-shadow 0.35s ease,border-color 0.35s ease;}
+  .sig-card:hover{transform:translateY(-4px);box-shadow:0 8px 22px rgba(107,66,38,0.1);border-color:rgba(107,66,38,0.25);}
+  .sig-id{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);letter-spacing:1px;margin-bottom:8px;}
+  .sig-light{width:32px;height:32px;border-radius:50%;margin:0 auto 6px;transition:background 0.5s cubic-bezier(0.22,1,0.36,1),box-shadow 0.5s ease;}
+  .sig-time{font-family:'Phage Regular',monospace;font-size:1.2rem;font-weight:700;color:var(--text);transition:color 0.3s ease;}
+  .sig-label{font-size:0.6rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+  .sig-density{font-size:0.65rem;color:var(--muted);margin-top:3px;transition:color 0.3s ease;}
+
+  #alertFeed{max-height:280px;overflow-y:auto;}
+  .alert-item{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);}
+  .alert-item:last-child{border-bottom:none;}
+  .alert-dot{width:7px;height:7px;border-radius:50%;margin-top:4px;flex-shrink:0;}
+  .alert-time{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);white-space:nowrap;}
+  .alert-text{flex:1;color:var(--text);line-height:1.4;font-size:0.76rem;}
+  .alert-tag{font-size:0.58rem;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;padding:2px 6px;border-radius:2px;white-space:nowrap;}
+  .tag-emer{background:rgba(165,42,42,0.1);color:var(--danger);border:1px solid rgba(165,42,42,0.25);}
+  .tag-info{background:rgba(107,66,38,0.08);color:var(--accent);border:1px solid rgba(107,66,38,0.2);}
+  .tag-warn{background:rgba(198,142,23,0.1);color:var(--warn);border:1px solid rgba(198,142,23,0.25);}
+  .tag-ok{background:rgba(139,105,20,0.08);color:var(--accent3);border:1px solid rgba(139,105,20,0.2);}
+  .alert-new{animation:alertSlide 0.4s ease;}
+  @keyframes alertSlide{from{opacity:0;transform:translateX(-10px);}to{opacity:1;transform:translateX(0);}}
+
+  .bar-chart{display:flex;align-items:flex-end;gap:4px;height:70px;margin-bottom:4px;}
+  .bar{flex:1;border-radius:2px 2px 0 0;min-width:14px;transition:height 0.8s ease;}
+  .bar-labels{display:flex;gap:4px;}
+  .bar-labels span{flex:1;text-align:center;font-size:0.58rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+
+  .route-opt{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;cursor:pointer;transition:all 0.35s cubic-bezier(0.22,1,0.36,1);margin-bottom:10px;position:relative;}
+  .route-opt:hover{border-color:rgba(107,66,38,0.35);transform:translateX(5px);box-shadow:0 6px 18px rgba(107,66,38,0.1);}
+  .route-opt:active{transform:translateX(3px) scale(0.99);}
+  .route-opt.best{border-color:rgba(139,105,20,0.4);background:rgba(139,105,20,0.04);}
+  .route-opt.best::after{content:'AI BEST';position:absolute;top:10px;right:10px;background:rgba(139,105,20,0.12);border:1px solid rgba(139,105,20,0.35);color:var(--accent3);font-family:'IBM Plex Mono',monospace;font-size:0.55rem;letter-spacing:1.5px;padding:2px 7px;border-radius:4px;animation:bestPulse 2s ease infinite;}
+  @keyframes bestPulse{0%,100%{box-shadow:0 0 4px rgba(139,105,20,0.15);}50%{box-shadow:0 0 10px rgba(139,105,20,0.3);}}
+  .route-name{font-family:'Phage Regular',monospace;font-size:0.8rem;color:var(--text);margin-bottom:8px;}
+  .route-stats{display:flex;gap:18px;}
+  .rsv{font-family:'Phage Regular',monospace;font-size:1rem;font-weight:700;}
+  .rsl{font-size:0.62rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+
+  .park-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;}
+  .slot{height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:0.55rem;cursor:pointer;border:1px solid;transition:all 0.25s cubic-bezier(0.22,1,0.36,1);}
+  .slot.free{background:rgba(139,105,20,0.06);border-color:rgba(139,105,20,0.35);color:var(--accent3);}
+  .slot.taken{background:rgba(165,42,42,0.06);border-color:rgba(165,42,42,0.2);color:var(--muted);}
+  .slot.reserved{background:rgba(198,142,23,0.08);border-color:rgba(198,142,23,0.25);color:var(--warn);}
+  .slot.free:hover{background:rgba(139,105,20,0.15);transform:scale(1.1);box-shadow:0 0 10px rgba(139,105,20,0.2);}
+  .slot.sel{background:rgba(139,105,20,0.22)!important;box-shadow:0 0 12px rgba(139,105,20,0.35);transform:scale(1.1);animation:slotSelected 0.8s ease infinite alternate;}
+  @keyframes slotSelected{from{box-shadow:0 0 8px rgba(139,105,20,0.25);}to{box-shadow:0 0 16px rgba(139,105,20,0.4);}}
+
+  .emer-banner{background:rgba(165,42,42,0.05);border:1px solid rgba(165,42,42,0.25);border-radius:6px;padding:18px;margin-bottom:16px;}
+  .emer-banner.active{animation:emerPulse 1.8s infinite;}
+  @keyframes emerPulse{0%,100%{border-color:rgba(165,42,42,0.25);}50%{border-color:rgba(165,42,42,0.6);box-shadow:0 0 18px rgba(165,42,42,0.1);}}
+  .emer-title{font-family:'Phage Regular',monospace;font-size:0.95rem;color:var(--danger);font-weight:700;margin-bottom:6px;}
+  .emer-route{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;}
+  .ener-node{background:rgba(255,45,85,0.15);border:1px solid rgba(255,45,85,0.4);color:var(--danger);padding:4px 10px;border-radius:2px;}
+  .emer-btn{background:rgba(165,42,42,0.08);border:1px solid rgba(165,42,42,0.3);color:var(--danger);font-family:'IBM Plex Mono',monospace;font-size:0.68rem;letter-spacing:1px;padding:8px 16px;border-radius:4px;cursor:pointer;transition:all 0.25s cubic-bezier(0.22,1,0.36,1);margin-top:10px;margin-right:8px;position:relative;overflow:hidden;}
+  .emer-btn:hover{background:rgba(165,42,42,0.15);transform:translateY(-2px);box-shadow:0 4px 15px rgba(165,42,42,0.12);}
+  .emer-btn:active{transform:translateY(0) scale(0.97);}
+
+  .rep-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;display:flex;gap:12px;transition:transform 0.3s cubic-bezier(0.22,1,0.36,1),box-shadow 0.3s ease,border-color 0.3s ease;}
+  .rep-card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(107,66,38,0.1);border-color:rgba(107,66,38,0.25);}
+  .rep-icon{font-size:1.5rem;flex-shrink:0;margin-top:2px;}
+  .rep-meta{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);margin-bottom:3px;}
+  .rep-text{font-size:0.76rem;color:var(--text);line-height:1.4;}
+  .vote-btn{background:rgba(107,66,38,0.06);border:1px solid var(--border);border-radius:4px;color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:0.62rem;padding:3px 9px;cursor:pointer;transition:all 0.25s cubic-bezier(0.22,1,0.36,1);margin-top:5px;margin-right:5px;}
+  .vote-btn:hover{background:rgba(107,66,38,0.12);transform:translateY(-1px);box-shadow:0 2px 8px rgba(107,66,38,0.1);}
+  .vote-btn:active{transform:scale(0.95);}
+
+  #dataTicker{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);display:flex;gap:24px;padding:4px 32px;background:rgba(107,66,38,0.03);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;}
+  .tick-val{color:var(--accent);}
+  #sensorBar{display:flex;gap:6px;margin-left:12px;}
+  .sensor-chip{font-size:0.58rem;padding:2px 7px;border-radius:3px;letter-spacing:1px;border:1px solid var(--border);}
+  .sensor-chip.on{color:var(--accent3);background:rgba(139,105,20,0.08);border-color:rgba(139,105,20,0.35);}
+  .sensor-chip.off{color:var(--muted);background:rgba(107,66,38,0.04);opacity:0.5;}
+
+  ::-webkit-scrollbar{width:4px;height:4px;}
+  ::-webkit-scrollbar-track{background:var(--surface2);}
+  ::-webkit-scrollbar-thumb{background:rgba(107,66,38,0.3);border-radius:2px;}
+  @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-main{grid-template-columns:1fr;}main{padding:14px 16px;}header,nav,#api-bar,#dataTicker{padding-left:16px;padding-right:16px;}}
+</style>
+</head>
+<body>
+
+<!-- GPS LOADING OVERLAY -->
+<div id="gpsOverlay">
+  <div class="gps-logo">NEX<span>U</span>S</div>
+  <div class="gps-spin"></div>
+  <div class="gps-status" id="gpsMsg">REQUESTING GPS LOCATION…<br><span>Please allow location access</span></div>
+  <button id="gpsDenyBtn" onclick="useDefaultCity()">Continue Without GPS</button>
+</div>
+
+<!-- API STATUS BAR -->
+<div id="api-bar">
+  <div class="api-dot"></div>
+  <span style="color:rgba(107,66,38,0.5)" id="apiEndpoint">ws://nexus-api.local/v1/traffic</span>
+  <span>STATUS: <span class="api-stat">CONNECTED</span></span>
+  <span>REFRESH: <span class="api-stat">2s</span></span>
+  <span>PACKETS RX: <span class="api-stat" id="packetCount">0</span></span>
+  <span>JUNCTIONS: <span class="api-stat" id="junctionCount">— ACTIVE</span></span>
+  <span>SENSORS: <span id="sensorBar"></span></span>
+  <div class="api-ping">LATENCY: <span id="ping-val">--</span>ms</div>
+</div>
+
+<!-- DATA TICKER -->
+<div id="dataTicker">
+  <span id="tk1">J-01: <span class="tick-val" id="t1">--</span> veh/min</span>
+  <span id="tk2">J-02: <span class="tick-val" id="t2">--</span> veh/min</span>
+  <span id="tk3">J-03: <span class="tick-val" id="t3">--</span> veh/min</span>
+  <span id="tk4">J-04: <span class="tick-val" id="t4">--</span> veh/min</span>
+  <span id="tk5">J-05: <span class="tick-val" id="t5">--</span> veh/min</span>
+  <span id="tk6">J-06: <span class="tick-val" id="t6">--</span> veh/min</span>
+  <span>TEMP: <span class="tick-val" id="tempVal">--</span>°<span id="tempUnit">C</span></span>
+  <span>HUMIDITY: <span class="tick-val" id="humVal">--</span>%</span>
+  <span>VISIBILITY: <span class="tick-val" id="visVal">--</span> <span id="distUnit">km</span></span>
+  <span>WIND: <span class="tick-val" id="windVal">--</span> <span id="speedUnit">km/h</span></span>
+</div>
+
+<header>
+  <div class="logo">NEX<span>U</span>S</div>
+  <div class="header-right">
+    <div class="live-badge"><div style="width:7px;height:7px;border-radius:50%;background:var(--accent3);box-shadow:0 0 6px rgba(139,105,20,0.4);animation:blink 1s infinite;"></div>LIVE FEED</div>
+    <span id="cityNetworkLabel">DETECTING CITY…</span>
+    <div class="time-display" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<nav>
+  <button class="active" onclick="showPanel('dashboard',this)">⬡ OVERVIEW</button>
+  <button onclick="showPanel('signals',this)">⚡ SIGNALS</button>
+  <button onclick="showPanel('routes',this)">🗺 ROUTES</button>
+  <button onclick="showPanel('reports',this)">📡 REPORTS</button>
+  <button onclick="showPanel('parking',this)">⬛ PARKING</button>
+  <button onclick="showPanel('emergency',this)">🚨 EMERGENCY</button>
+</nav>
+
+<main>
+
+<!-- ══════════ DASHBOARD ══════════ -->
+<div class="panel active" id="dashboard">
+  <div class="grid-4">
+    <div class="card" id="cardVehicles">
+      <div class="card-label">ACTIVE VEHICLES</div>
+      <div class="card-value" id="vehicleCount">—</div>
+      <div class="card-sub" id="vehicleTrend">Loading…</div>
+      <div class="progress-bar"><div class="progress-fill" id="vehicleBar" style="width:0%"></div></div>
+    </div>
+    <div class="card orange" id="cardCong">
+      <div class="card-label">AVG CONGESTION</div>
+      <div class="card-value orange" id="congPct">—</div>
+      <div class="card-sub" id="congLabel">Loading…</div>
+      <div class="progress-bar"><div class="progress-fill orange" id="congBar" style="width:0%"></div></div>
+    </div>
+    <div class="card green" id="cardSig">
+      <div class="card-label">SIGNALS OPTIMIZED</div>
+      <div class="card-value green" id="sigOpt">—</div>
+      <div class="card-sub">AI managing live junctions</div>
+      <div class="progress-bar"><div class="progress-fill green" id="sigBar" style="width:0%"></div></div>
+    </div>
+    <div class="card danger" id="cardInc">
+      <div class="card-label">ACTIVE INCIDENTS</div>
+      <div class="card-value danger" id="incCount">—</div>
+      <div class="card-sub" id="incLabel">Loading…</div>
+      <div class="progress-bar"><div class="progress-fill danger" id="incBar" style="width:0%"></div></div>
+    </div>
+  </div>
+  <div class="grid-main">
+    <div class="col">
+      <div class="map-wrap">
+        <div class="card-title">CITY TEMPERATURE — 24H GRAPH <span id="mapTimestamp" style="font-size:0.6rem;color:var(--muted)">Updating…</span></div>
+        <canvas id="tempGraphCanvas"></canvas>
+        <div style="display:flex;gap:18px;margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);">
+          <span><span style="color:#6b4226">━━</span> TEMPERATURE °<span id="graphTempUnit">C</span></span>
+          <span><span style="color:rgba(107,66,38,0.15)">▓▓</span> RANGE FILL</span>
+          <span>● DATA POINT</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">24H TRAFFIC VOLUME <span style="font-size:0.6rem;color:var(--muted)" id="chartUpdateTime">—</span></div>
+        <div class="bar-chart" id="hourlyChart"></div>
+        <div class="bar-labels" id="hourlyLabels"></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card" style="flex:1;">
+        <div class="card-title">LIVE ALERT FEED <span id="alertCount" class="badge">0</span></div>
+        <div id="alertFeed"></div>
+      </div>
+      <div class="card orange">
+        <div class="card-title" style="color:var(--accent2);">ML PEAK PREDICTION</div>
+        <div class="card-label">NEXT CONGESTION PEAK</div>
+        <div class="card-value orange" id="peakTime">—</div>
+        <div class="card-sub" id="peakConf">Loading…</div>
+        <div class="card-sub" id="peakZones" style="color:var(--accent2);margin-top:3px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ SIGNALS ══════════ -->
+<div class="panel" id="signals">
+  <div class="section-title">AI SIGNAL MANAGEMENT <span class="badge" id="sigBadge">LOADING</span></div>
+  <div class="grid-3" style="margin-bottom:18px;">
+    <div class="card green"><div class="card-label">TIME SAVED TODAY</div><div class="card-value green" id="timeSaved">—</div><div class="card-sub">Across all managed signals</div></div>
+    <div class="card"><div class="card-label">SIGNAL ADJUSTMENTS</div><div class="card-value" id="adjustCount">—</div><div class="card-sub">Auto-adjustments since midnight</div></div>
+    <div class="card orange"><div class="card-label">MANUAL OVERRIDES</div><div class="card-value orange" id="overrideCount">—</div><div class="card-sub">Operator-controlled junctions</div></div>
+  </div>
+  <div class="signal-grid" id="signalGrid"></div>
+</div>
+
+<!-- ══════════ ROUTES ══════════ -->
+<div class="panel" id="routes">
+  <div class="section-title">SMART ROUTE INTELLIGENCE <span class="badge">AI POWERED</span></div>
+  <div class="grid-2">
+    <div><div class="card">
+      <div class="card-title">ROUTE OPTIONS <span id="routeUpdated" style="color:var(--muted);font-size:0.6rem;">—</span></div>
+      <div id="routeList"></div>
+    </div></div>
+    <div class="col">
+      <div class="card green">
+        <div class="card-title" style="color:var(--accent3);">🌱 CARBON TRACKER</div>
+        <div class="card-label">CO₂ SAVED TODAY (AI ROUTING)</div>
+        <div class="card-value green" id="co2Saved">—</div>
+        <div class="card-sub" id="co2Sub">—</div>
+        <div style="height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;margin-top:8px;">
+          <div id="co2Bar" style="height:100%;background:linear-gradient(90deg,#8b6914,#6b4226);border-radius:4px;width:0%;transition:width 1.5s ease;"></div>
+        </div>
+      </div>
+      <div class="card"><div class="card-title">LIVE ROAD CONDITIONS</div><div id="roadConditions"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ REPORTS ══════════ -->
+<div class="panel" id="reports">
+  <div class="section-title">CROWDSOURCED TRAFFIC INTELLIGENCE <span class="badge">LIVE FEED</span></div>
+  <div class="grid-2">
+    <div><div id="reportFeed"></div></div>
+    <div class="col">
+      <div class="card">
+        <div class="card-title">SUBMIT A REPORT</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          <button style="background:rgba(165,42,42,0.06);border:1px solid rgba(165,42,42,0.2);color:var(--danger);padding:11px;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;" onclick="submitReport('ACCIDENT','🚨')">🚨 ACCIDENT</button>
+          <button style="background:rgba(198,142,23,0.08);border:1px solid rgba(198,142,23,0.2);color:var(--warn);padding:11px;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;" onclick="submitReport('ROADWORK','🚧')">🚧 ROADWORK</button>
+          <button style="background:rgba(160,82,45,0.06);border:1px solid rgba(160,82,45,0.2);color:var(--accent2);padding:11px;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;" onclick="submitReport('TRAFFIC JAM','🚗')">🚗 JAM</button>
+          <button style="background:rgba(107,66,38,0.06);border:1px solid var(--border);color:var(--accent);padding:11px;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;" onclick="submitReport('HAZARD','⚠️')">⚠️ HAZARD</button>
+        </div>
+        <div style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);">One-tap • AI verifies in 60s • Earn reward points</div>
+      </div>
+      <div class="card green">
+        <div class="card-title" style="color:var(--accent3);">REWARD LEADERBOARD</div>
+        <div id="leaderboard" style="display:flex;flex-direction:column;gap:7px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ PARKING ══════════ -->
+<div class="panel" id="parking">
+  <div class="section-title">SMART PARKING MANAGEMENT <span class="badge">REAL-TIME</span></div>
+  <div class="grid-3" style="margin-bottom:18px;">
+    <div class="card green"><div class="card-label">ZONE A FREE SLOTS</div><div class="card-value green" id="zoneA">—</div><div class="progress-bar"><div class="progress-fill green" id="zoneABar" style="width:0%"></div></div></div>
+    <div class="card warn"><div class="card-label">ZONE B FREE SLOTS</div><div class="card-value warn" id="zoneB">—</div><div class="progress-bar"><div class="progress-fill orange" id="zoneBBar" style="width:0%"></div></div></div>
+    <div class="card danger"><div class="card-label">ZONE C FREE SLOTS</div><div class="card-value danger" id="zoneC">—</div><div class="progress-bar"><div class="progress-fill danger" id="zoneCBar" style="width:0%"></div></div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">ZONE A — LIVE SLOTS <span id="parkUpdateTime" style="color:var(--muted);font-size:0.6rem;">—</span></div>
+      <div class="park-grid" id="parkGrid"></div>
+      <div style="display:flex;gap:14px;margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--muted);">
+        <span><span style="color:#8b6914">■</span> FREE</span><span><span style="color:#a52a2a">■</span> TAKEN</span><span><span style="color:#c68e17">■</span> RESERVED</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <div class="card-title">PRE-BOOK A SLOT</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--muted);margin-bottom:10px;">Click a green slot above, then confirm</div>
+        <button onclick="bookSlot()" style="width:100%;background:rgba(107,66,38,0.08);border:1px solid var(--border);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;letter-spacing:2px;padding:11px;border-radius:4px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(107,66,38,0.15)'" onmouseout="this.style.background='rgba(107,66,38,0.08)'">CONFIRM BOOKING + PAY <span id="parkRate">…</span></button>
+      </div>
+      <div class="card"><div class="card-title">NAVIGATION TO PARKING</div>
+        <div class="alert-item"><div class="alert-dot" style="background:var(--accent)"></div><div class="alert-text" style="font-size:0.73rem;" id="parkNav1">Loading directions…</div></div>
+        <div class="alert-item"><div class="alert-dot" style="background:var(--accent)"></div><div class="alert-text" style="font-size:0.73rem;" id="parkNav2">Zone A entrance on left — look for blue board</div></div>
+        <div class="alert-item"><div class="alert-dot" style="background:var(--accent3)"></div><div class="alert-text" style="font-size:0.73rem;" id="navMsg">Select a slot to reserve</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ EMERGENCY ══════════ -->
+<div class="panel" id="emergency">
+  <div class="section-title">EMERGENCY VEHICLE MANAGEMENT <span class="badge" id="emerBadge" style="color:var(--accent3);border-color:rgba(57,255,20,0.4);background:rgba(57,255,20,0.08);">MONITORING</span></div>
+  <div class="emer-banner" id="emerBanner">
+    <div class="emer-title" id="emerTitle">🔍 SCANNING — NO ACTIVE EMERGENCY</div>
+    <div style="font-size:0.78rem;color:var(--muted);" id="emerDetails">All corridors clear. System is monitoring junctions.</div>
+    <div class="emer-route" id="emerRoute"></div>
+    <div id="emerActions"></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-title" style="color:var(--danger);">CORRIDOR SIGNAL STATUS</div><div id="corridorStatus" style="display:flex;flex-direction:column;gap:8px;"></div></div>
+    <div class="card"><div class="card-title">EMERGENCY HISTORY TODAY</div><div id="emerHistory" style="display:flex;flex-direction:column;gap:6px;"></div></div>
+  </div>
+</div>
+
+</main>
+
+<script>
+// ═══════════════════════════════════════
+//  CITY CONTEXT — ALL DATA DERIVES FROM HERE
+// ═══════════════════════════════════════
+const City = {
+  lat: 11.3410, lon: 77.7172,
+  name: 'Erode', district: 'Erode', state: 'Tamil Nadu',
+  country: 'India', countryCode: 'IN',
+  currency: '₹', unit: 'metric',
+  junctions: [], roads: [], landmarks: [], plate: 'TN-33', parkRate: '₹40',
+
+  // Country-specific config
+  countryConfig: {
+    US:{ currency:'$',   unit:'imperial', plate:'', parkRate:'$5'  },
+    GB:{ currency:'£',   unit:'metric',   plate:'', parkRate:'£3'  },
+    AU:{ currency:'A$',  unit:'metric',   plate:'', parkRate:'A$4' },
+    DE:{ currency:'€',   unit:'metric',   plate:'', parkRate:'€2'  },
+    JP:{ currency:'¥',   unit:'metric',   plate:'', parkRate:'¥200'},
+    IN:{ currency:'₹',   unit:'metric',   plate:'', parkRate:'₹40' },
+    CA:{ currency:'CA$', unit:'metric',   plate:'', parkRate:'CA$4'},
+    FR:{ currency:'€',   unit:'metric',   plate:'', parkRate:'€2'  },
+    SG:{ currency:'S$',  unit:'metric',   plate:'', parkRate:'S$2' },
+    AE:{ currency:'AED', unit:'metric',   plate:'', parkRate:'AED5'},
+  },
+
+  init(geo) {
+    const a = geo.address || {};
+    this.name     = a.city || a.town || a.village || a.county || geo.display_name.split(',')[0].trim();
+    this.district = a.county || a.state_district || a.suburb || this.name;
+    this.state    = a.state || '';
+    this.country  = a.country || '';
+    this.countryCode = (a.country_code || 'in').toUpperCase();
+
+    const cfg = this.countryConfig[this.countryCode] || { currency:'$', unit:'metric', plate:'', parkRate:'$3' };
+    this.currency = cfg.currency;
+    this.unit = cfg.unit;
+    this.parkRate = cfg.parkRate;
+    // If India, build state plate prefix
+    if(this.countryCode === 'IN') {
+      const statePlates = {
+        'Tamil Nadu':'TN','Karnataka':'KA','Kerala':'KL','Andhra Pradesh':'AP',
+        'Telangana':'TS','Maharashtra':'MH','Delhi':'DL','Gujarat':'GJ',
+        'Rajasthan':'RJ','Uttar Pradesh':'UP','West Bengal':'WB','Punjab':'PB',
+        'Haryana':'HR','Madhya Pradesh':'MP','Bihar':'BR','Odisha':'OD',
+      };
+      const abbr = statePlates[this.state] || this.state.substring(0,2).toUpperCase();
+      this.plate = abbr + '-' + String(Math.floor(Math.random()*90+10));
+    }
+
+    const C = this.name;
+    const D = this.district || this.state;
+    this.junctions = [
+      `${C} Central Junc`, `${C} Bus Terminal`, `${D} Main Rd Junction`,
+      `${C} North Circle`,  `${D} Bypass Junc`,  `${C} South Gate`,
+      `Govt Hospital Junc`, `City Collectorate`,  `${C} Market Circle`,
+    ];
+    this.roads = [
+      `${C} Main Road`,  `${D} Highway`,       `${C} Bypass Road`,
+      `North Ring Road`, `${C} Old Town Rd`,   `${D} Express Way`,
+      `City Outer Ring`, `NH Junction Road`,
+    ];
+    this.landmarks = [
+      `${C} Bus Stand`,     `Govt Hospital`,       `${C} Central Market`,
+      `${D} Collectorate`,  `${C} Railway Station`, `Main Post Office`,
+    ];
+
+    this.updateUI();
+  },
+
+  updateUI() {
+    document.getElementById('cityNetworkLabel').textContent = `${this.name.toUpperCase()} CITY NETWORK`;
+    document.getElementById('apiEndpoint').textContent = `ws://nexus-${this.name.toLowerCase().replace(/\s+/g,'-')}.local/v1/traffic`;
+    document.getElementById('junctionCount').textContent = `${this.junctions.length} ACTIVE`;
+    document.getElementById('parkRate').textContent = `${this.parkRate}/hr`;
+    document.getElementById('parkNav1').textContent = `Turn right at ${this.landmarks[0]} signal — 400m ahead`;
+    if(this.unit === 'imperial') {
+      document.getElementById('tempUnit').textContent = 'F';
+      document.getElementById('distUnit').textContent = 'mi';
+      document.getElementById('speedUnit').textContent = 'mph';
+    }
+    // Update ticker labels with junction names
+    this.junctions.slice(0,6).forEach((j,i) => {
+      const tk = document.getElementById('tk'+(i+1));
+      if(tk) tk.firstChild.textContent = `J-0${i+1} ${j.split(' ')[0]}: `;
+    });
+  }
+};
+
+// ═══════════════════════════════════════
+//  GPS DETECTION
+// ═══════════════════════════════════════
+async function detectCity() {
+  const msg = document.getElementById('gpsMsg');
+  setTimeout(() => { document.getElementById('gpsDenyBtn').style.display='block'; }, 5000);
+
+  if(!navigator.geolocation) { useDefaultCity(); return; }
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    City.lat = pos.coords.latitude;
+    City.lon = pos.coords.longitude;
+    msg.innerHTML = `GPS LOCKED: <span>${City.lat.toFixed(4)}°, ${City.lon.toFixed(4)}°</span><br>Identifying location…`;
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${City.lat}&lon=${City.lon}&format=json&addressdetails=1`,
+        { headers:{ 'Accept-Language':'en', 'User-Agent':'NEXUS-TrafficApp/2.0' }}
+      );
+      const geo = await res.json();
+      City.init(geo);
+      msg.innerHTML = `LOCATION IDENTIFIED<br><span>${City.name}, ${City.state || City.country}</span><br>Initialising traffic feeds…`;
+      setTimeout(launchApp, 900);
+    } catch(e) {
+      City.name = `${City.lat.toFixed(2)}N ${City.lon.toFixed(2)}E`;
+      City.init({ address:{} });
+      setTimeout(launchApp, 800);
+    }
+  }, () => { useDefaultCity(); }, { timeout:12000 });
+}
+
+function useDefaultCity() {
+  City.lat=11.3410; City.lon=77.7172;
+  City.init({ address:{ city:'Erode', county:'Erode District', state:'Tamil Nadu', country:'India', country_code:'in' }});
+  launchApp();
+}
+
+function launchApp() {
+  document.getElementById('gpsOverlay').classList.add('hidden');
+  API.start({ sensorMode: false });
+}
+
+// ═══════════════════════════════════════
+//  LIVE API ENGINE
+// ═══════════════════════════════════════
+const API = {
+  packetCount:0, listeners:{},
+  on(ch,cb){ (this.listeners[ch]=this.listeners[ch]||[]).push(cb); },
+  emit(ch,d){ (this.listeners[ch]||[]).forEach(cb=>cb(d)); },
+  ping(){ return Math.floor(8+Math.random()*24); },
+
+  start(opts={}){
+    const skip = opts.sensorMode ? ['vehicles','signals','ticker','parking','emergency'] : [];
+    if(!skip.length){
+      setInterval(()=>{ this.packetCount++; document.getElementById('packetCount').textContent=this.packetCount; document.getElementById('ping-val').textContent=this.ping(); this.emit('vehicles',this.genVehicles()); this.emit('signals',this.genSignals()); this.emit('ticker',this.genTicker()); },2000);
+    } else {
+      setInterval(()=>{ document.getElementById('ping-val').textContent=this.ping(); },2000);
+    }
+    setInterval(()=>{ this.emit('tempgraph',this.genTempGraph()); if(!skip.includes('parking')) this.emit('parking',this.genParking()); this.emit('congestion',this.genCongestion()); },5000);
+    setInterval(()=>{ if(!skip.includes('emergency')) this.emit('alerts',this.genAlert()); this.emit('routes',this.genRoutes()); if(!skip.includes('emergency')) this.emit('emergency',this.genEmergency()); },12000);
+    setInterval(()=>{ this.emit('chart',this.genChart()); this.emit('reports',this.genReport()); },30000);
+    const boot=['congestion','routes','chart','reports','tempgraph'];
+    if(!skip.includes('vehicles')) boot.unshift('vehicles','signals','ticker');
+    if(!skip.includes('parking')) boot.push('parking');
+    if(!skip.includes('emergency')) boot.push('emergency');
+    setTimeout(()=>{ boot.forEach(ch=>this.emit(ch,this['gen'+ch.charAt(0).toUpperCase()+ch.slice(1)]()||{})); },400);
+  },
+
+  genVehicles(){
+    const base = 8000 + City.name.length * 300;
+    const count = base + Math.floor(Math.sin(Date.now()/120000)*3000 + Math.random()*500);
+    const prev = parseInt(document.getElementById('vehicleCount').textContent.replace(/,/g,''))||count;
+    return { count, diff:count-prev, load:Math.min(95,Math.floor(count/180)) };
+  },
+  genCongestion(){
+    const h=new Date().getHours(), base=h>=8&&h<=10||h>=17&&h<=20?75:h>=11&&h<=16?55:35;
+    const pct=Math.max(10,Math.min(98,base+Math.floor(Math.random()*18-9)));
+    const labels=['VERY LOW','LOW','MODERATE','HIGH','CRITICAL'];
+    return { pct, label:pct<20?labels[0]:pct<40?labels[1]:pct<60?labels[2]:pct<80?labels[3]:labels[4] };
+  },
+  genSignals(){
+    return City.junctions.map((loc,i)=>{ const d=Math.floor(20+Math.random()*85),s=d>75?'red':d>45?'yellow':'green',t=s==='green'?Math.floor(20+Math.random()*40):s==='yellow'?Math.floor(2+Math.random()*5):Math.floor(10+Math.random()*35); return {id:`J-0${i+1}`,loc,density:d,state:s,time:t}; });
+  },
+  genTempGraph(){
+    const h=new Date().getHours();
+    // Realistic diurnal temperature curve — cooler at night, peaks mid-afternoon
+    const baseCurve=[22,21,20,19.5,19,19.5,21,24,27,30,32,34,35,36,36.5,36,34,32,30,28,26,25,24,23];
+    const temps=baseCurve.map((t,i)=>{
+      let jitter=(Math.random()-0.5)*2;
+      // Make future hours slightly uncertain
+      if(i>h) jitter+=(Math.random()-0.5)*3;
+      let val=t+jitter;
+      if(City.unit==='imperial') val=val*9/5+32;
+      return parseFloat(val.toFixed(1));
+    });
+    return {temps,currentHour:h};
+  },
+  genParking(){
+    const h=new Date().getHours(),occ=h>=9&&h<=18?.65+Math.random()*.25:.2+Math.random()*.3;
+    const zones={A:{total:48,free:Math.max(0,Math.floor(48*(1-occ+.1+Math.random()*.1)))},B:{total:40,free:Math.max(0,Math.floor(40*(1-occ+Math.random()*.05)))},C:{total:32,free:Math.max(0,Math.floor(32*(1-occ-.1+Math.random()*.05)))}};
+    return {zones,slots:Array.from({length:48},()=>{ const r=Math.random(); return r<occ-.05?'taken':r<occ?'reserved':'free'; })};
+  },
+  genAlert(){
+    const R=City.roads,L=City.landmarks;
+    const tmpl=[
+      {t:`Signal J-0{n} timing auto-adjusted: {a}s→{b}s (AI density update)`,tag:'info',col:'var(--accent)'},
+      {t:`Heavy congestion at ${R[Math.floor(Math.random()*R.length)]}. Rerouting {v} vehicles.`,tag:'warn',col:'var(--warn)'},
+      {t:`Crowd report: Minor accident at ${L[Math.floor(Math.random()*L.length)]}. 1 lane affected.`,tag:'warn',col:'var(--warn)'},
+      {t:`Emergency vehicle on ${R[Math.floor(Math.random()*R.length)]}. Signal pre-emption ON.`,tag:'emer',col:'var(--danger)'},
+      {t:`Parking Zone {z} now {p}% full. AI directing overflow to Zone A.`,tag:'ok',col:'var(--accent3)'},
+      {t:`ML model updated: next peak {t}AM ±12min. Confidence {c}%.`,tag:'info',col:'var(--accent)'},
+      {t:`Road clearance at ${L[Math.floor(Math.random()*L.length)]}. Normal signal cycle resumed.`,tag:'ok',col:'var(--accent3)'},
+    ];
+    const tp=tmpl[Math.floor(Math.random()*tmpl.length)];
+    const text=tp.t.replace('{n}',Math.floor(1+Math.random()*9)).replace('{a}',Math.floor(30+Math.random()*20)).replace('{b}',Math.floor(15+Math.random()*20)).replace('{v}',Math.floor(100+Math.random()*300)).replace('{z}',['B','C'][Math.floor(Math.random()*2)]).replace('{p}',Math.floor(75+Math.random()*20)).replace('{t}',Math.floor(8+Math.random()*4)).replace('{c}',Math.floor(82+Math.random()*15));
+    const now=new Date();
+    return {text,tag:tp.tag,col:tp.col,time:`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`};
+  },
+  genRoutes(){
+    const b=12+Math.floor(Math.random()*6),R=City.roads;
+    return [{name:`VIA ${(R[0]||'MAIN ROAD').toUpperCase()}`,time:b,cong:'LOW',dist:8.2,fuel:0.8,best:true},{name:`VIA ${(R[2]||'BYPASS').toUpperCase()}`,time:b+4+Math.floor(Math.random()*5),cong:'MED',dist:11.1,fuel:1.0,best:false},{name:`VIA ${(R[1]||'HIGHWAY').toUpperCase()}`,time:b+8+Math.floor(Math.random()*6),cong:'HIGH',dist:9.6,fuel:1.1,best:false}];
+  },
+  genEmergency(){
+    if(Math.random()>.3) return {active:false};
+    const types=['🚑 AMBULANCE','🚒 FIRE TRUCK','👮 POLICE'];
+    return {active:true,type:types[Math.floor(Math.random()*types.length)],vehicle:`${City.plate||'XX'}-${String.fromCharCode(65+Math.floor(Math.random()*26))}A-${1000+Math.floor(Math.random()*9000)}`,from:City.landmarks[0]||'Hospital A',to:City.landmarks[1]||'Hospital B',eta:Math.floor(4+Math.random()*8),nearby:Math.floor(150+Math.random()*200)};
+  },
+  genTicker(){
+    let temp=22+Math.random()*15,vis=4+Math.random()*6,wind=8+Math.random()*18;
+    if(City.unit==='imperial'){temp=temp*9/5+32;vis*=0.621;wind*=0.621;}
+    return {j:Array.from({length:6},()=>Math.floor(20+Math.random()*90)),temp:temp.toFixed(1),hum:Math.floor(55+Math.random()*30),vis:vis.toFixed(1),wind:Math.floor(wind)};
+  },
+  genChart(){
+    const h=new Date().getHours(),p=[5,4,4,5,10,25,70,88,92,78,62,55,58,68,78,82,86,80,65,50,38,25,15,8];
+    return p.map((v,i)=>Math.max(2,Math.min(100,i<=h?v+(Math.random()*12-6):v)));
+  },
+  genReport(){
+    const types=[{icon:'🚨',type:'ACCIDENT',text:'Vehicle collision reported.',tag:'emer'},{icon:'🚧',type:'ROADWORK',text:'Road construction, 1 lane closed.',tag:'warn'},{icon:'🌊',type:'WATERLOG',text:'Waterlogging near low-lying area.',tag:'warn'},{icon:'🚗',type:'TRAFFIC JAM',text:'Bumper-to-bumper traffic forming.',tag:'warn'},{icon:'⚠️',type:'HAZARD',text:'Debris on road — drive carefully.',tag:'info'}];
+    const t=types[Math.floor(Math.random()*types.length)],loc=City.roads[Math.floor(Math.random()*City.roads.length)],votes=Math.floor(3+Math.random()*50),now=new Date();
+    return {...t,loc,votes,verified:votes>15,time:`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,pts:Math.floor(5+Math.random()*15)};
+  }
+};
+
+// ═══════════════════════════════════════
+//  UI UPDATERS
+// ═══════════════════════════════════════
+function flashEl(el,cls='flash'){el.classList.remove(cls);void el.offsetWidth;el.classList.add(cls);setTimeout(()=>el.classList.remove(cls),700);}
+
+API.on('vehicles',d=>{
+  const el=document.getElementById('vehicleCount'),old=parseInt(el.textContent.replace(/,/g,''))||0;
+  if(old!==d.count){el.textContent=d.count.toLocaleString();flashEl(document.getElementById('cardVehicles'));document.getElementById('vehicleTrend').textContent=d.diff>0?`↑ ${d.diff} vehicles in last 2s`:`↓ ${Math.abs(d.diff)} vehicles in last 2s`;document.getElementById('vehicleBar').style.width=d.load+'%';}
+});
+API.on('congestion',d=>{
+  document.getElementById('congPct').textContent=d.pct+'%';document.getElementById('congLabel').textContent=d.label+' congestion';document.getElementById('congBar').style.width=d.pct+'%';flashEl(document.getElementById('cardCong'),'flash-orange');
+  const opt=Math.floor(7+Math.random()*3);document.getElementById('sigOpt').textContent=`${opt}/${City.junctions.length}`;document.getElementById('sigBar').style.width=(opt/City.junctions.length*100)+'%';
+  const inc=Math.floor(d.pct/30);document.getElementById('incCount').textContent=inc;document.getElementById('incLabel').textContent=inc===0?'All clear':inc===1?'1 emergency':'Multiple incidents';document.getElementById('incBar').style.width=(inc/5*100)+'%';
+});
+API.on('ticker',d=>{
+  for(let i=0;i<6;i++)document.getElementById('t'+(i+1)).textContent=d.j[i];
+  document.getElementById('tempVal').textContent=d.temp;document.getElementById('humVal').textContent=d.hum;document.getElementById('visVal').textContent=d.vis;document.getElementById('windVal').textContent=d.wind;
+});
+API.on('signals',d=>{
+  const grid=document.getElementById('signalGrid');
+  if(!grid.children.length){d.forEach(s=>{const c=document.createElement('div');c.className='sig-card';c.id='sig-'+s.id;c.innerHTML=`<div class="sig-id">${s.id} — ${s.loc}</div><div class="sig-light" id="light-${s.id}"></div><div class="sig-time" id="time-${s.id}">${s.time}s</div><div class="sig-label">REMAINING</div><div class="sig-density" id="den-${s.id}">${s.density} veh/min</div>`;grid.appendChild(c);});}
+  d.forEach(s=>{const l=document.getElementById('light-'+s.id),te=document.getElementById('time-'+s.id),de=document.getElementById('den-'+s.id);if(l){const col={green:'#6b8e23',yellow:'#c68e17',red:'#a52a2a'}[s.state];l.style.background=col;l.style.boxShadow=`0 0 14px ${col}`;}if(te)te.textContent=s.time+'s';if(de){de.textContent=s.density+' veh/min';de.style.color=s.density>75?'var(--danger)':s.density>50?'var(--warn)':'var(--accent3)';}});
+  const h=new Date().getHours();document.getElementById('timeSaved').textContent=(1.5+h*0.1).toFixed(1)+'h';document.getElementById('adjustCount').textContent=100+Math.floor(h*8+Math.random()*10);document.getElementById('overrideCount').textContent=Math.floor(1+Math.random()*4);document.getElementById('sigBadge').textContent=d.filter(s=>s.state!=='red').length+' OPTIMIZED';
+  const pk=new Date().getHours()<10?'9:30':'5:45';document.getElementById('peakTime').textContent=pk+(pk==='9:30'?' AM':' PM');document.getElementById('peakConf').textContent=`Confidence: ${Math.floor(84+Math.random()*12)}% • Duration: ~${35+Math.floor(Math.random()*20)} min`;
+  document.getElementById('peakZones').textContent='Hotspots: '+City.junctions.slice(0,3).map(j=>j.split(' ')[0]).join(', ');
+});
+API.on('tempgraph',d=>{
+  const canvas=document.getElementById('tempGraphCanvas'),W=canvas.offsetWidth||600,H=240;
+  canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  const pad={top:25,right:20,bottom:32,left:45};
+  const gW=W-pad.left-pad.right,gH=H-pad.top-pad.bottom;
+  const temps=d.temps,min=Math.floor(Math.min(...temps)-2),max=Math.ceil(Math.max(...temps)+2);
+  const unit=City.unit==='imperial'?'°F':'°C';
+  if(document.getElementById('graphTempUnit')) document.getElementById('graphTempUnit').textContent=City.unit==='imperial'?'F':'C';
+
+  // Background
+  ctx.fillStyle='#f5ede4';ctx.fillRect(0,0,W,H);
+
+  // Grid lines
+  ctx.strokeStyle='rgba(107,66,38,0.08)';ctx.lineWidth=1;
+  const ySteps=5;
+  for(let i=0;i<=ySteps;i++){
+    const y=pad.top+gH*(i/ySteps);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
+    const val=(max-(max-min)*(i/ySteps)).toFixed(0);
+    ctx.fillStyle='rgba(107,66,38,0.6)';ctx.font='10px IBM Plex Mono,monospace';ctx.textAlign='right';
+    ctx.fillText(val+unit,pad.left-6,y+3.5);
+  }
+
+  // X axis labels
+  const hrs=['12A','1A','2A','3A','4A','5A','6A','7A','8A','9A','10A','11A','12P','1P','2P','3P','4P','5P','6P','7P','8P','9P','10P','11P'];
+  ctx.fillStyle='rgba(107,66,38,0.5)';ctx.font='9px IBM Plex Mono,monospace';ctx.textAlign='center';
+  for(let i=0;i<24;i+=2){
+    const x=pad.left+gW*(i/23);
+    ctx.fillText(hrs[i],x,H-pad.bottom+16);
+    ctx.strokeStyle='rgba(107,66,38,0.06)';ctx.beginPath();ctx.moveTo(x,pad.top);ctx.lineTo(x,pad.top+gH);ctx.stroke();
+  }
+
+  // Helper to map data to canvas coordinates
+  function tx(i){return pad.left+gW*(i/23);}
+  function ty(v){return pad.top+gH*(1-(v-min)/(max-min));}
+
+  // Gradient fill under curve
+  const grad=ctx.createLinearGradient(0,pad.top,0,pad.top+gH);
+  grad.addColorStop(0,'rgba(107,66,38,0.18)');grad.addColorStop(0.5,'rgba(107,66,38,0.06)');grad.addColorStop(1,'rgba(107,66,38,0)');
+  ctx.beginPath();ctx.moveTo(tx(0),ty(temps[0]));
+  for(let i=1;i<24;i++){
+    const cx1=tx(i-0.5),cy1=ty(temps[i-1]),cx2=tx(i-0.5),cy2=ty(temps[i]);
+    ctx.bezierCurveTo(cx1,cy1,cx2,cy2,tx(i),ty(temps[i]));
+  }
+  ctx.lineTo(tx(23),pad.top+gH);ctx.lineTo(tx(0),pad.top+gH);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+
+  // Main line
+  ctx.beginPath();ctx.moveTo(tx(0),ty(temps[0]));
+  for(let i=1;i<24;i++){
+    const cx1=tx(i-0.5),cy1=ty(temps[i-1]),cx2=tx(i-0.5),cy2=ty(temps[i]);
+    ctx.bezierCurveTo(cx1,cy1,cx2,cy2,tx(i),ty(temps[i]));
+  }
+  ctx.strokeStyle='#6b4226';ctx.lineWidth=2.5;ctx.shadowColor='rgba(107,66,38,0.3)';ctx.shadowBlur=8;ctx.stroke();ctx.shadowBlur=0;
+
+  // Data points
+  for(let i=0;i<24;i++){
+    const x=tx(i),y=ty(temps[i]);
+    // Past hours: solid dots. Future: hollow dots
+    if(i<=d.currentHour){
+      ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);
+      ctx.fillStyle=temps[i]>=35||(City.unit==='imperial'&&temps[i]>=95)?'#a52a2a':temps[i]>=30||(City.unit==='imperial'&&temps[i]>=86)?'#a0522d':'#6b4226';
+      ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=1;ctx.stroke();
+    } else {
+      ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);
+      ctx.strokeStyle='rgba(107,66,38,0.3)';ctx.lineWidth=1.5;ctx.setLineDash([2,2]);ctx.stroke();ctx.setLineDash([]);
+    }
+  }
+
+  // Current hour marker
+  if(d.currentHour<24){
+    const cx=tx(d.currentHour),cy=ty(temps[d.currentHour]);
+    ctx.beginPath();ctx.arc(cx,cy,6,0,Math.PI*2);
+    ctx.strokeStyle='#6b4226';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,10,0,Math.PI*2);
+    ctx.strokeStyle='rgba(107,66,38,0.2)';ctx.lineWidth=1;ctx.stroke();
+    // Current temp label
+    ctx.fillStyle='#6b4226';ctx.font='bold 11px Orbitron,monospace';ctx.textAlign='center';
+    ctx.fillText(temps[d.currentHour]+unit,cx,cy-14);
+    ctx.fillStyle='rgba(107,66,38,0.5)';ctx.font='8px IBM Plex Mono,monospace';
+    ctx.fillText('NOW',cx,cy-25);
+  }
+
+  document.getElementById('mapTimestamp').textContent='Updated '+new Date().toLocaleTimeString();
+});
+let alertCount=0;
+API.on('alerts',d=>{
+  alertCount++;document.getElementById('alertCount').textContent=alertCount;const feed=document.getElementById('alertFeed');const item=document.createElement('div');item.className='alert-item alert-new';item.innerHTML=`<div class="alert-dot" style="background:${d.col};box-shadow:0 0 5px ${d.col}"></div><div style="flex:1"><div class="alert-time">${d.time}</div><div class="alert-text">${d.text}</div><span class="alert-tag tag-${d.tag}">${d.tag.toUpperCase()}</span></div>`;feed.insertBefore(item,feed.firstChild);while(feed.children.length>6)feed.removeChild(feed.lastChild);
+});
+API.on('chart',d=>{
+  const chart=document.getElementById('hourlyChart'),labels=document.getElementById('hourlyLabels'),max=Math.max(...d);chart.innerHTML='';labels.innerHTML='';const hrs=['12A','2A','4A','6A','8A','10A','12P','2P','4P','6P','8P','10P'];d.forEach((v,i)=>{const bar=document.createElement('div');bar.className='bar';bar.style.height=(v/max*100)+'%';bar.style.background=v>80?'linear-gradient(180deg,var(--danger),rgba(165,42,42,0.15))':v>60?'linear-gradient(180deg,var(--accent2),rgba(160,82,45,0.15))':'linear-gradient(180deg,var(--accent),rgba(107,66,38,0.1))';chart.appendChild(bar);});hrs.forEach(l=>{const s=document.createElement('span');s.textContent=l;labels.appendChild(s);});document.getElementById('chartUpdateTime').textContent='Updated '+new Date().toLocaleTimeString();
+});
+API.on('routes',d=>{
+  const list=document.getElementById('routeList');list.innerHTML='';const cc={LOW:'var(--accent3)',MED:'var(--warn)',HIGH:'var(--danger)'};d.forEach(r=>{const div=document.createElement('div');div.className='route-opt'+(r.best?' best':'');div.innerHTML=`<div class="route-name">${r.name}</div><div class="route-stats"><div><div class="rsv" style="color:${cc[r.cong]}">${r.time} min</div><div class="rsl">EST. TIME</div></div><div><div class="rsv" style="color:${cc[r.cong]}">${r.cong}</div><div class="rsl">CONGESTION</div></div><div><div class="rsv" style="color:var(--text)">${r.dist} km</div><div class="rsl">DISTANCE</div></div><div><div class="rsv" style="color:var(--text)">${r.fuel} L</div><div class="rsl">FUEL EST.</div></div></div>`;list.appendChild(div);});document.getElementById('routeUpdated').textContent='Updated '+new Date().toLocaleTimeString();
+  document.getElementById('co2Saved').textContent=(40+Math.random()*20).toFixed(1)+' kg';document.getElementById('co2Sub').textContent=`Across ${(1000+Math.floor(Math.random()*500)).toLocaleString()} re-routed vehicles`;document.getElementById('co2Bar').style.width=Math.floor(55+Math.random()*30)+'%';
+  const conds=[{col:'var(--danger)',text:`${City.roads[0]||'Main Rd'} — Accident, 2 lanes blocked`,tag:'emer',label:'AVOID'},{col:'var(--warn)',text:`${City.roads[1]||'Highway'} — Heavy traffic, proceed carefully`,tag:'warn',label:'CAUTION'},{col:'var(--accent3)',text:`${City.roads[2]||'Bypass'} — Clear, AI recommended`,tag:'ok',label:'CLEAR'},{col:'var(--accent)',text:`${City.roads[3]||'Ring Rd'} — Road work 7AM–12PM`,tag:'info',label:'WORKS'}];
+  document.getElementById('roadConditions').innerHTML=conds.map(c=>`<div class="alert-item"><div class="alert-dot" style="background:${c.col}"></div><div class="alert-text" style="font-size:0.73rem;">${c.text}</div><span class="alert-tag tag-${c.tag}">${c.label}</span></div>`).join('');
+});
+API.on('parking',d=>{
+  ['A','B','C'].forEach(z=>{const zd=d.zones[z];document.getElementById('zone'+z).textContent=`${zd.free}/${zd.total}`;document.getElementById('zone'+z+'Bar').style.width=((1-zd.free/zd.total)*100)+'%';});
+  const grid=document.getElementById('parkGrid'),sel=document.querySelector('.slot.sel')?.dataset.id;grid.innerHTML='';
+  d.slots.forEach((state,i)=>{const slot=document.createElement('div');slot.className=`slot ${state}`+(String(i)===sel?' sel':'');slot.dataset.id=String(i);slot.textContent=state==='taken'?'':'A'+String(i+1).padStart(2,'0');if(state==='free')slot.onclick=()=>{document.querySelectorAll('.slot.sel').forEach(x=>x.classList.remove('sel'));slot.classList.add('sel');document.getElementById('navMsg').textContent=`Slot ${slot.textContent} reserved for 10 min`;};grid.appendChild(slot);});document.getElementById('parkUpdateTime').textContent='Updated '+new Date().toLocaleTimeString();
+});
+API.on('emergency',d=>{
+  const banner=document.getElementById('emerBanner'),badge=document.getElementById('emerBadge');
+  if(!d.active){banner.classList.remove('active');badge.textContent='MONITORING';badge.style.cssText='color:var(--accent3);border-color:rgba(139,105,20,0.35);background:rgba(139,105,20,0.06);';document.getElementById('emerTitle').textContent='🔍 SCANNING — NO ACTIVE EMERGENCY';document.getElementById('emerDetails').textContent=`All corridors clear. System monitoring ${City.junctions.length} junctions.`;document.getElementById('emerRoute').innerHTML='';document.getElementById('emerActions').innerHTML='';document.getElementById('corridorStatus').innerHTML='<div style="font-family:\'IBM Plex Mono\',monospace;font-size:0.72rem;color:var(--accent3);padding:8px;">✓ All corridors clear</div>';}
+  else{banner.classList.add('active');badge.textContent='⚠ ACTIVE INCIDENT';badge.style.cssText='color:var(--danger);border-color:rgba(165,42,42,0.35);background:rgba(165,42,42,0.08);';document.getElementById('emerTitle').textContent=`${d.type} DETECTED — ${(City.roads[0]||'MAIN ROAD').toUpperCase()}`;document.getElementById('emerDetails').textContent=`Vehicle: ${d.vehicle} | ${d.from} → ${d.to} | ETA: ${d.eta} min`;document.getElementById('emerRoute').innerHTML=`<div class="ener-node">${d.from}</div><span style="color:var(--danger)">→</span><div class="ener-node">${City.junctions[1]||'Junc 2'}</div><span style="color:var(--danger)">→</span><div class="ener-node">${City.junctions[0]||'Central'}</div><span style="color:var(--danger)">→</span><div class="ener-node">${d.to}</div>`;document.getElementById('emerActions').innerHTML=`<button class="emer-btn" onclick="alert('Notified ${d.nearby} vehicles!')">📲 NOTIFY ${d.nearby} VEHICLES</button><button class="emer-btn" onclick="alert('All signals cleared!')">⚡ CLEAR ALL SIGNALS</button>`;
+  const jS=['GREEN ✓','GREEN ✓','CLEARING…','PENDING'],jC=['var(--accent3)','var(--accent3)','var(--warn)','var(--danger)'],jB=['rgba(139,105,20,0.04)','rgba(139,105,20,0.04)','rgba(198,142,23,0.05)','rgba(165,42,42,0.04)'];document.getElementById('corridorStatus').innerHTML=City.junctions.slice(0,4).map((n,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px;background:${jB[i]};border:1px solid var(--border);border-radius:4px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;">${n}</span><span style="color:${jC[i]};font-family:'Orbitron',monospace;font-size:0.75rem;">${jS[i]}</span></div>`).join('');}
+  document.getElementById('emerHistory').innerHTML=[{t:'08:42',type:'🚑 Ambulance',route:`${City.landmarks[0]||'Hosp A'}→${City.landmarks[1]||'Dest'}`,dur:'7 min'},{t:'07:15',type:'🚒 Fire Truck',route:`Station→${City.roads[0]||'Main Rd'}`,dur:'5 min'},{t:'06:30',type:'👮 Police',route:`PS→${City.landmarks[3]||'Collectorate'}`,dur:'3 min'}].map(h=>`<div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;padding:6px;background:rgba(107,66,38,0.03);border:1px solid var(--border);border-radius:4px;"><span style="color:var(--muted)">${h.t}</span><span>${h.type}</span><span style="color:var(--muted)">${h.route}</span><span style="color:var(--accent3)">${h.dur}</span></div>`).join('');
+});
+const reportPool=[];
+API.on('reports',d=>{
+  reportPool.unshift(d);if(reportPool.length>5)reportPool.pop();
+  document.getElementById('reportFeed').innerHTML=reportPool.map(r=>`<div class="rep-card"><div class="rep-icon">${r.icon}</div><div><div class="rep-meta">${r.verified?'✓ VERIFIED':'PENDING'} · ${r.time} · ${r.loc} ${r.verified?'· ⭐ +'+r.pts+' pts':''}</div><div class="rep-text">${r.type} reported. ${r.text}</div><button class="vote-btn" onclick="this.textContent='✓ CONFIRMED'">👍 Confirm (${r.votes})</button><span class="alert-tag tag-${r.tag}" style="font-size:0.6rem;padding:2px 7px;">${r.verified?'VERIFIED BY '+r.votes:'PENDING'}</span></div></div>`).join('');
+  const pfx=City.name.substring(0,4).toLowerCase();
+  document.getElementById('leaderboard').innerHTML=[{rank:'🥇',u:`${pfx}_user_2891`,p:1240+Math.floor(Math.random()*20)},{rank:'🥈',u:`priya_${pfx.substring(0,3)}`,p:980+Math.floor(Math.random()*15)},{rank:'🥉',u:`kumar_2023`,p:741+Math.floor(Math.random()*10)},{rank:'4',u:`rajan.${pfx}`,p:620},{rank:'5',u:`driver_${pfx}99`,p:540}].map(l=>`<div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;"><span style="color:var(--warn)">${l.rank} ${l.u}</span><span style="color:var(--accent3)">${l.p.toLocaleString()} pts</span></div>`).join('');
+});
+
+// ═══════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════
+function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+setInterval(updateClock,1000);updateClock();
+
+let currentPanel = 'dashboard';
+function showPanel(id, btn) {
+  if (id === currentPanel) return;
+  const oldPanel = document.getElementById(currentPanel);
+  const newPanel = document.getElementById(id);
+
+  // Animate out old panel
+  oldPanel.classList.remove('panel-enter');
+  oldPanel.classList.add('panel-exit');
+
+  // Switch nav buttons
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // After exit animation, switch panels
+  setTimeout(() => {
+    oldPanel.classList.remove('active', 'panel-exit');
+    oldPanel.style.opacity = '0';
+    newPanel.classList.add('active');
+    // Force reflow
+    void newPanel.offsetWidth;
+    newPanel.classList.add('panel-enter');
+    currentPanel = id;
+
+    // Staggered card entry animation
+    const cards = newPanel.querySelectorAll('.card, .sig-card, .route-opt, .rep-card, .emer-banner');
+    cards.forEach((card, i) => {
+      card.classList.add('card-animate');
+      card.classList.remove('card-visible');
+      setTimeout(() => {
+        card.classList.add('card-visible');
+      }, 60 + i * 50);
+    });
+  }, 250);
+}
+
+// Add ripple effect to all nav buttons and action buttons
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('nav button, .emer-btn, .vote-btn, [onclick*="submitReport"]');
+  if (!btn) return;
+  const ripple = document.createElement('span');
+  ripple.className = 'ripple';
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  ripple.style.width = ripple.style.height = size + 'px';
+  ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  btn.style.position = 'relative';
+  btn.style.overflow = 'hidden';
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 600);
+});
+
+// Animate initial dashboard cards on first load
+setTimeout(() => {
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) {
+    const cards = dashboard.querySelectorAll('.card, .map-wrap');
+    cards.forEach((card, i) => {
+      card.classList.add('card-animate');
+      setTimeout(() => card.classList.add('card-visible'), 100 + i * 70);
+    });
+  }
+}, 500);
+
+function bookSlot(){const sel=document.querySelector('.slot.sel');if(!sel){alert('Please click a green (free) parking slot first!');return;}alert(`✅ Booking Confirmed!\nSlot: ${sel.textContent}\nCity: ${City.name}\nRate: ${City.parkRate}/hr\nSlot held for 10 minutes.`);}
+
+function submitReport(type,icon){const loc=City.roads[Math.floor(Math.random()*City.roads.length)]||'Main Road';alert(`📡 Report submitted!\nType: ${icon} ${type}\nLocation: ${loc}\nCity: ${City.name}\nAI verifying… +10 reward points queued!`);API.emit('reports',API.genReport());}
+
+// ═══════════════════════════════════════
+//  BOOT — GPS FIRST
+// ═══════════════════════════════════════
+detectCity();
+</script>
+</body>
+</html>
